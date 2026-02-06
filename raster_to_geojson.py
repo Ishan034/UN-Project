@@ -90,11 +90,16 @@ def raster_to_geojson():
 
     gdf = gpd.GeoDataFrame(features, geometry="geometry", crs=crs)
 
-    # Clip to country boundary
-    boundary = gpd.read_file(BOUNDARY_PATH, engine="fiona").to_crs(crs)
+    # 🔑 Reproject to WGS84 BEFORE saving
+    gdf = gdf.to_crs(epsg=4326)
+
+    # Optional: clip after reprojection
+    boundary = gpd.read_file(BOUNDARY_PATH, engine="fiona").to_crs(epsg=4326)
     gdf = gpd.clip(gdf, boundary)
 
+    # Save GeoJSON already Mapbox-ready
     gdf.to_file(OUT_GEOJSON, driver="GeoJSON")
+
     print(f"GeoJSON written to {OUT_GEOJSON}")
 
     summary = {

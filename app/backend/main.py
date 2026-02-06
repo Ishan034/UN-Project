@@ -2,13 +2,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from datetime import datetime
-import geopandas as gpd
 import json
 
 app = FastAPI()
 
 # =========================
-# CORS (required)
+# CORS
 # =========================
 app.add_middleware(
     CORSMiddleware,
@@ -21,8 +20,7 @@ app.add_middleware(
 # PATHS
 # =========================
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PREDICTIONS_DIR = PROJECT_ROOT / "data" / "predictions"
-ZONES_FILE = PREDICTIONS_DIR / "migration_zones.geojson"
+ZONES_FILE = PROJECT_ROOT / "data" / "predictions" / "migration_zones.geojson"
 
 LEAD_TIME_DAYS = 21
 
@@ -37,14 +35,8 @@ def predict():
             detail="No prediction available. Run offline inference first."
         )
 
-    # 🔑 Load with GeoPandas
-    gdf = gpd.read_file(ZONES_FILE)
-
-    # 🔑 CRITICAL FIX: reproject to WGS84 (lat/lon)
-    gdf = gdf.to_crs(epsg=4326)
-
-    # Convert to GeoJSON dict
-    zones_geojson = json.loads(gdf.to_json())
+    with open(ZONES_FILE, "r", encoding="utf-8") as f:
+        zones_geojson = json.load(f)
 
     features = zones_geojson.get("features", [])
 
@@ -55,7 +47,6 @@ def predict():
         1 for f in features if f["properties"].get("type") == "destination"
     )
 
-    # Simple confidence heuristic
     confidence = min(0.95, 0.5 + 0.05 * (source_zones + destination_zones))
 
     return {
