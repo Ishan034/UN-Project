@@ -1,146 +1,173 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN;
 
-/*
-  🔴 Migration SOURCE zones
-  These represent areas cattle are migrating FROM
-*/
-const migrationSources = [
-  { lng: 29.9, lat: 7.9, weight: 1.0 },
-  { lng: 30.2, lat: 7.6, weight: 0.8 },
-];
-
-/*
-  🟢 Migration DESTINATION zones
-  These represent areas cattle are migrating TOWARDS
-*/
-const migrationDestinations = [
-  { lng: 31.3, lat: 6.8, weight: 0.9 },
-  { lng: 31.6, lat: 6.5, weight: 1.0 },
-];
-
 export default function MapView() {
-  useEffect(() => {
-    // 🔗 Backend call (already verified working)
-    fetch("https://un-project-4ajo.onrender.com/predict", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("Prediction response from backend:", data);
-      });
+  const mapContainer = useRef(null);
+  const mapRef = useRef(null);
 
-    // 🗺️ Initialize map
-    const map = new mapboxgl.Map({
-      container: "map",
+  const [zones, setZones] = useState(null);
+  const [confidence, setConfidence] = useState(null);
+  const [leadTime, setLeadTime] = useState(null);
+  const [error, setError] = useState(null);
+
+  /* ===============================
+     1️⃣ Fetch prediction (GET)
+     =============================== */
+  useEffect(() => {
+    fetch("https://un-project-4ajo.onrender.com/predict")
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`Backend error: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        console.log("Prediction response:", data);
+        setZones(data.zones);
+        setConfidence(data.confidence);
+        setLeadTime(data.lead_time_days);
+      })
+      .catch((err) => {
+        console.error(err);
+        setError("Failed to load prediction");
+      });
+  }, []);
+
+  /* ===============================
+     2️⃣ Initialize map ONCE
+     =============================== */
+  useEffect(() => {
+    if (mapRef.current) return;
+
+    mapRef.current = new mapboxgl.Map({
+      container: mapContainer.current,
       style: "mapbox://styles/mapbox/light-v11",
       center: [30.8, 7.2],
       zoom: 6,
     });
 
-    map.addControl(new mapboxgl.NavigationControl(), "top-right");
-
-    map.on("load", () => {
-      /* ================================
-         🔴 SOURCE HEATMAP (RED)
-         ================================ */
-      map.addSource("migration-source", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: migrationSources.map((p) => ({
-            type: "Feature",
-            geometry: {
-              type: "Point",
-              coordinates: [p.lng, p.lat],
-            },
-            properties: {
-              weight: p.weight,
-            },
-          })),
-        },
-      });
-
-      map.addLayer({
-        id: "migration-source-heat",
-        type: "heatmap",
-        source: "migration-source",
-        paint: {
-          "heatmap-weight": ["get", "weight"],
-          "heatmap-radius": 45,
-          "heatmap-opacity": 0.6,
-          "heatmap-color": [
-            "interpolate",
-            ["linear"],
-            ["heatmap-density"],
-            0,
-            "rgba(255,0,0,0)",
-            0.4,
-            "rgba(255,120,120,0.5)",
-            0.8,
-            "rgba(180,0,0,0.9)",
-          ],
-        },
-      });
-
-      /* ================================
-         🟢 DESTINATION HEATMAP (GREEN)
-         ================================ */
-      map.addSource("migration-destination", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: migrationDestinations.map((p) => ({
-            type: "Feature",
-            geometry: {
-              type: "Point",
-              coordinates: [p.lng, p.lat],
-            },
-            properties: {
-              weight: p.weight,
-            },
-          })),
-        },
-      });
-
-      map.addLayer({
-        id: "migration-destination-heat",
-        type: "heatmap",
-        source: "migration-destination",
-        paint: {
-          "heatmap-weight": ["get", "weight"],
-          "heatmap-radius": 45,
-          "heatmap-opacity": 0.6,
-          "heatmap-color": [
-            "interpolate",
-            ["linear"],
-            ["heatmap-density"],
-            0,
-            "rgba(0,255,0,0)",
-            0.4,
-            "rgba(120,220,120,0.5)",
-            0.8,
-            "rgba(0,140,0,0.9)",
-          ],
-        },
-      });
-    });
-
-    return () => map.remove();
+    mapRef.current.addControl(
+      new mapboxgl.NavigationControl(),
+      "top-right"
+    );
   }, []);
 
+  /* ===============================
+     3️⃣ Add GeoJSON layers SAFELY
+     =============================== */
+  useEffect(() => {
+    if (!zones || !mapRef.current) return;
+
+    const map = mapRef.current;
+
+    const addLayers = () => {
+      // Avoid duplicates
+      if (map.getSource("migration-zones")) {
+        map.getSource("migration-zones").setData(zones);
+        return;
+      }
+
+      map.addSource("migration-zones", {
+        type: "geojson",
+        data: zones,
+      });
+
+      // 🔴 SOURCE (FROM)
+      map.addLayer({
+        id: "migration-source",
+        type: "fill",
+        source: "migration-zones",
+        filter: ["==", ["get", "type"], "source"],
+        paint: {
+          "fill-color": "#d73027",
+          "fill-opacity": 0.55,
+        },
+      });
+
+      // 🟢 DESTINATION (TO)
+      map.addLayer({
+        id: "migration-destination",
+        type: "fill",
+        source: "migration-zones",
+        filter: ["==", ["get", "type"], "destination"],
+        paint: {
+          "fill-color": "#1a9850",
+          "fill-opacity": 0.55,
+        },
+      });
+
+      // Outline
+      map.addLayer({
+        id: "migration-outline",
+        type: "line",
+        source: "migration-zones",
+        paint: {
+          "line-color": "#333",
+          "line-width": 1,
+        },
+      });
+    };
+
+    if (map.isStyleLoaded()) {
+      addLayers();
+    } else {
+      map.once("load", addLayers);
+    }
+  }, [zones]);
+
   return (
-    <div
-      id="map"
-      style={{
-        width: "100%",
-        height: "100vh",
-      }}
-    />
+    <>
+      {/* 🗺️ Map */}
+      <div
+        ref={mapContainer}
+        style={{ width: "100%", height: "100vh" }}
+      />
+
+      {/* 📊 Info Panel */}
+      {confidence !== null && !error && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 20,
+            left: 20,
+            background: "white",
+            padding: "12px 16px",
+            borderRadius: "6px",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+            fontSize: "14px",
+            maxWidth: "260px",
+          }}
+        >
+          <div><b>Confidence:</b> {confidence}</div>
+          <div><b>Lead time:</b> {leadTime} days</div>
+          <div>
+            <b>Status:</b>{" "}
+            {confidence < 0.6
+              ? "Low migration pressure detected"
+              : "Elevated migration risk"}
+          </div>
+        </div>
+      )}
+
+      {/* ❌ Error state */}
+      {error && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 20,
+            left: 20,
+            background: "#fee",
+            padding: "12px 16px",
+            borderRadius: "6px",
+            color: "#900",
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </>
   );
 }

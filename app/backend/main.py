@@ -1,40 +1,52 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+import json
+from datetime import datetime
 
-app = FastAPI(title="Cattle Migration Prediction API", version="0.1")
+app = FastAPI()
 
+# ✅ CORS (required)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.get("/")
-def root():
-    return {"status": "API running", "scope": "UN demo"}
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PREDICTIONS_DIR = PROJECT_ROOT / "data/predictions"
+ZONES_FILE = PREDICTIONS_DIR / "migration_zones.geojson"
 
-@app.post("/predict")
+LEAD_TIME_DAYS = 21
+
+# ✅ Accept BOTH GET and POST
+@app.api_route("/predict", methods=["GET", "POST"])
 def predict():
-    # Placeholder for model inference
-    return {
-        "heatmap_url": "/static/mock_heatmap.json",
-        "confidence": 0.78,
-        "lead_time_days": 21
-    }
+    if not ZONES_FILE.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No prediction available. Run offline inference first."
+        )
 
-@app.post("/upload-dataset")
-def upload_dataset(file: UploadFile = File(...)):
-    return {
-        "filename": file.filename,
-        "status": "uploaded and queued for processing"
-    }
+    with open(ZONES_FILE, "r", encoding="utf-8") as f:
+        zones_geojson = json.load(f)
 
-@app.get("/metrics")
-def metrics():
+    features = zones_geojson.get("features", [])
+
+    source_zones = sum(
+        1 for f in features if f["properties"]["type"] == "source"
+    )
+    destination_zones = sum(
+        1 for f in features if f["properties"]["type"] == "destination"
+    )
+
+    confidence = min(0.95, 0.5 + 0.05 * (source_zones + destination_zones))
+
     return {
-        "accuracy": 0.81,
-        "conflicts_prevented_est": 34,
-        "evaluation_window_days": 30
+        "status": "ok",
+        "last_updated": datetime.utcnow().isoformat() + "Z",
+        "lead_time_days": LEAD_TIME_DAYS,
+        "confidence": round(confidence, 2),
+        "zones": zones_geojson,
     }
