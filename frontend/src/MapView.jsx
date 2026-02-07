@@ -45,7 +45,7 @@ export default function MapView() {
     mapRef.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/light-v11",
-      center: [30.8, 7.2],
+      center: [30.8, 7.2], // South Sudan
       zoom: 6,
     });
 
@@ -56,26 +56,35 @@ export default function MapView() {
   }, []);
 
   /* ===============================
-     3️⃣ Add GeoJSON layers SAFELY
+     3️⃣ Add / update GeoJSON layers
      =============================== */
   useEffect(() => {
     if (!zones || !mapRef.current) return;
 
     const map = mapRef.current;
 
-    const addLayers = () => {
-      // Avoid duplicates
+    const addOrUpdateLayers = () => {
+      // Remove existing layers if any
+      if (map.getLayer("migration-source")) {
+        map.removeLayer("migration-source");
+      }
+      if (map.getLayer("migration-destination")) {
+        map.removeLayer("migration-destination");
+      }
+      if (map.getLayer("migration-outline")) {
+        map.removeLayer("migration-outline");
+      }
       if (map.getSource("migration-zones")) {
-        map.getSource("migration-zones").setData(zones);
-        return;
+        map.removeSource("migration-zones");
       }
 
+      // Add source
       map.addSource("migration-zones", {
         type: "geojson",
         data: zones,
       });
 
-      // 🔴 SOURCE (FROM)
+      // 🔴 SOURCE ZONES
       map.addLayer({
         id: "migration-source",
         type: "fill",
@@ -87,7 +96,7 @@ export default function MapView() {
         },
       });
 
-      // 🟢 DESTINATION (TO)
+      // 🟢 DESTINATION ZONES
       map.addLayer({
         id: "migration-destination",
         type: "fill",
@@ -112,21 +121,30 @@ export default function MapView() {
     };
 
     if (map.isStyleLoaded()) {
-      addLayers();
+      addOrUpdateLayers();
     } else {
-      map.once("load", addLayers);
+      map.once("load", addOrUpdateLayers);
     }
   }, [zones]);
 
+  /* ===============================
+     4️⃣ Derived UI state
+     =============================== */
+  const hasZones =
+    zones &&
+    zones.features &&
+    Array.isArray(zones.features) &&
+    zones.features.length > 0;
+
   return (
     <>
-      {/* 🗺️ Map */}
+      {/* 🗺️ MAP */}
       <div
         ref={mapContainer}
         style={{ width: "100%", height: "100vh" }}
       />
 
-      {/* 📊 Info Panel */}
+      {/* 📊 INFO PANEL */}
       {confidence !== null && !error && (
         <div
           style={{
@@ -138,21 +156,23 @@ export default function MapView() {
             borderRadius: "6px",
             boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
             fontSize: "14px",
-            maxWidth: "260px",
+            maxWidth: "280px",
           }}
         >
           <div><b>Confidence:</b> {confidence}</div>
           <div><b>Lead time:</b> {leadTime} days</div>
           <div>
             <b>Status:</b>{" "}
-            {confidence < 0.6
-              ? "Low migration pressure detected"
-              : "Elevated migration risk"}
+            {!hasZones
+              ? "No significant migration pressure detected"
+              : confidence < 0.6
+                ? "Low migration pressure detected"
+                : "Elevated migration risk"}
           </div>
         </div>
       )}
 
-      {/* ❌ Error state */}
+      {/* ❌ ERROR STATE */}
       {error && (
         <div
           style={{
