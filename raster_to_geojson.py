@@ -1,15 +1,13 @@
 """
-Raster → GeoJSON conversion (V2 – SIGNAL-AWARE)
----------------------------------------------
+Raster → GeoJSON conversion (V2 – CORRIDOR-AWARE)
+-----------------------------------------------
 Converts migration pressure raster into source/destination zones
-ONLY when a meaningful spatial signal exists.
+using CONNECTED PIXEL CLUSTERS instead of area-based filtering.
 
-Key improvements:
-- Suppresses whole-country false positives
-- Handles near-uniform pressure fields honestly
-- Outputs EMPTY GeoJSON when no significant migration pressure is detected
-
-This is UN-grade early-warning behavior.
+This is correct for pastoral migration:
+- Allows thin corridors
+- Allows fragmented but coherent zones
+- Avoids whole-country false positives
 """
 
 from pathlib import Path
@@ -33,14 +31,12 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_GEOJSON = OUT_DIR / "migration_zones.geojson"
 
 # =========================
-# CONFIG (SIGNAL GUARDS)
+# CONFIG (V2 FINAL)
 # =========================
-LOW_PERCENTILE = 15     # bottom 15% → source
-HIGH_PERCENTILE = 85    # top 15% → destination
-
-MIN_PRESSURE_SPREAD = 0.01   # suppress if signal too weak
-MAX_AREA_RATIO = 0.3         # suppress giant blobs (>30% of country)
-MIN_PIXELS = 25              # remove tiny noise regions
+LOW_PERCENTILE = 25
+HIGH_PERCENTILE = 75
+MIN_PRESSURE_SPREAD = 0.005
+MIN_PIXELS = 6   # connected pixels, NOT area
 
 # =========================
 # MAIN
@@ -68,7 +64,6 @@ def raster_to_geojson():
     if pressure_range < MIN_PRESSURE_SPREAD:
         print("Pressure field too uniform → no significant migration signal")
 
-        # Write EMPTY GeoJSON (valid but no zones)
         empty_gdf = gpd.GeoDataFrame(
             columns=["geometry", "type", "pressure"],
             geometry="geometry",
@@ -91,30 +86,49 @@ def raster_to_geojson():
 
     features = []
 
+    # -------------------------
+    # SOURCE ZONES
+    # -------------------------
     print("Extracting source zones...")
     for geom, val in shapes(data, mask=source_mask, transform=transform):
         geom_shape = shape(geom)
-        if geom_shape.area < MIN_PIXELS:
+
+        # Connected pixel count (not area!)
+        pixel_count = int(geom_shape.area / abs(transform.a * transform.e))
+
+        if pixel_count < MIN_PIXELS:
             continue
+
         features.append({
             "geometry": geom_shape,
             "pressure": float(val),
             "type": "source",
         })
 
+    # -------------------------
+    # DESTINATION ZONES
+    # -------------------------
     print("Extracting destination zones...")
     for geom, val in shapes(data, mask=dest_mask, transform=transform):
         geom_shape = shape(geom)
-        if geom_shape.area < MIN_PIXELS:
+
+        pixel_count = int(geom_shape.area / abs(transform.a * transform.e))
+
+        if pixel_count < MIN_PIXELS:
             continue
+
         features.append({
             "geometry": geom_shape,
             "pressure": float(val),
             "type": "destination",
         })
 
+    # -------------------------
+    # EMPTY CHECK
+    # -------------------------
     if not features:
         print("No valid regions after filtering → writing empty GeoJSON")
+
         empty_gdf = gpd.GeoDataFrame(
             columns=["geometry", "type", "pressure"],
             geometry="geometry",
@@ -125,26 +139,14 @@ def raster_to_geojson():
 
     gdf = gpd.GeoDataFrame(features, geometry="geometry", crs=crs)
 
-    # Reproject to WGS84 for Mapbox
+    # Reproject for Mapbox
     gdf = gdf.to_crs(epsg=4326)
 
     # -------------------------
-    # CLIP + AREA FILTER
+    # CLIP TO BOUNDARY ONLY
     # -------------------------
     boundary = gpd.read_file(BOUNDARY_PATH, engine="fiona").to_crs(epsg=4326)
     gdf = gpd.clip(gdf, boundary)
-
-    country_area = boundary.geometry.area.sum()
-    gdf["area_ratio"] = gdf.geometry.area / country_area
-    gdf = gdf[gdf["area_ratio"] < MAX_AREA_RATIO]
-
-    if gdf.empty:
-        print("All regions filtered out → writing empty GeoJSON")
-        gdf = gpd.GeoDataFrame(
-            columns=["geometry", "type", "pressure"],
-            geometry="geometry",
-            crs="EPSG:4326",
-        )
 
     # -------------------------
     # SAVE

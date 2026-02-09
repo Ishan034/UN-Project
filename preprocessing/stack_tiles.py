@@ -1,17 +1,14 @@
 """
-Tile tensor stacker (PyTorch) — ROBUST VERSION
---------------------------------------------
-This version FIXES raster misalignment by explicitly reprojecting
-Rainfall onto the NDVI grid before stacking.
+Tile tensor stacker (PyTorch) — V2 TEMPORAL NDVI SAFE
+---------------------------------------------------
+Stacks ΔNDVI + Rainfall tiles without destroying
+temporal signal.
 
-Pipeline:
-1. Load NDVI raster (reference grid)
-2. Load Rainfall raster
-3. Reproject Rainfall -> NDVI grid if needed
-4. Extract [NDVI, Rainfall] tiles (64×64)
-5. Save each tile as a PyTorch tensor [2, 64, 64]
-
-This is production-safe and expected in real geospatial ML.
+Fixes:
+- Uses ndvi_delta_1km.tif explicitly
+- Does NOT clip or normalize ΔNDVI
+- Preserves negative values
+- Ensures rainfall is reprojected onto NDVI grid
 """
 
 from pathlib import Path
@@ -33,7 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TILE_SIZE = 64  # pixels (1 km per pixel)
 TARGET_CRS = "EPSG:3857"
 
-NDVI_PATH = PROJECT_ROOT / "data/processed/ndvi_1km.tif"
+NDVI_PATH = PROJECT_ROOT / "data/processed/ndvi_delta_1km.tif"
 RAIN_PATH = PROJECT_ROOT / "data/processed/rainfall_30d_1km.tif"
 BOUNDARY_PATH = PROJECT_ROOT / "data/boundaries/south_sudan.shp"
 OUTPUT_DIR = PROJECT_ROOT / "data/tensors"
@@ -75,19 +72,27 @@ def stack_tiles():
     print("Loading rasters...")
 
     with rasterio.open(NDVI_PATH) as ndvi_src, rasterio.open(RAIN_PATH) as rain_src:
-        print("NDVI grid:", ndvi_src.transform)
-        print("Rain grid:", rain_src.transform)
+        print("NDVI CRS:", ndvi_src.crs)
+        print("Rain CRS:", rain_src.crs)
 
-        # 🔑 FIX: Force rainfall onto NDVI grid
+        # -------------------------
+        # Read NDVI Δ (NO clipping)
+        # -------------------------
+        ndvi_data = ndvi_src.read(1).astype(np.float32)
+
+        # -------------------------
+        # Reproject rainfall if needed
+        # -------------------------
         if ndvi_src.transform != rain_src.transform or ndvi_src.crs != rain_src.crs:
             print("Reprojecting rainfall to match NDVI grid...")
             rainfall_data = reproject_to_match(rain_src, ndvi_src)
         else:
             rainfall_data = rain_src.read(1).astype(np.float32)
 
-        ndvi_data = ndvi_src.read(1).astype(np.float32)
-
-        boundary = gpd.read_file(BOUNDARY_PATH, engine="fiona").to_crs(TARGET_CRS)
+        # -------------------------
+        # Boundary in NDVI CRS
+        # -------------------------
+        boundary = gpd.read_file(BOUNDARY_PATH, engine="fiona").to_crs(ndvi_src.crs)
         minx, miny, maxx, maxy = boundary.total_bounds
 
         transform = ndvi_src.transform
@@ -102,19 +107,28 @@ def stack_tiles():
             for y in y_coords:
                 row, col = world_to_pixel(ndvi_src, x, y)
 
-                window = Window(col, row, TILE_SIZE, TILE_SIZE)
-
-                try:
-                    ndvi_patch = ndvi_data[row:row+TILE_SIZE, col:col+TILE_SIZE]
-                    rain_patch = rainfall_data[row:row+TILE_SIZE, col:col+TILE_SIZE]
-                except Exception:
+                # Bounds check
+                if (
+                    row < 0
+                    or col < 0
+                    or row + TILE_SIZE > ndvi_data.shape[0]
+                    or col + TILE_SIZE > ndvi_data.shape[1]
+                ):
                     continue
+
+                ndvi_patch = ndvi_data[row : row + TILE_SIZE, col : col + TILE_SIZE]
+                rain_patch = rainfall_data[row : row + TILE_SIZE, col : col + TILE_SIZE]
 
                 if ndvi_patch.shape != (TILE_SIZE, TILE_SIZE):
                     continue
 
+                # Skip tiles with almost no NDVI signal
+                if np.nanstd(ndvi_patch) < 0.01:
+                    continue
+
                 tensor = torch.tensor(
-                    np.stack([ndvi_patch, rain_patch]), dtype=torch.float32
+                    np.stack([ndvi_patch, rain_patch]),
+                    dtype=torch.float32,
                 )
 
                 torch.save(tensor, OUTPUT_DIR / f"tile_{tile_id}.pt")
