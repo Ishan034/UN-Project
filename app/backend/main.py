@@ -1,11 +1,30 @@
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import json
 from datetime import datetime
 
 app = FastAPI()
 
+# =========================
+# 🔓 ENABLE CORS (CRITICAL)
+# =========================
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",        # local React
+        "https://un-project-4ajo.onrender.com",  # deployed frontend (if any)
+        "*"                             # safe for demo / UN prototype
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# =========================
+# PATHS
+# =========================
 BASE_DIR = Path(__file__).resolve().parent.parent
 PRED_DIR = BASE_DIR / "data" / "predictions"
 
@@ -18,24 +37,21 @@ def root():
     return {"status": "ok"}
 
 
-# -------------------------
-# EXISTING PREDICT ENDPOINT
-# -------------------------
+# =========================
+# PREDICTION METADATA
+# =========================
 @app.get("/predict")
 def predict():
     if not ZONES_FILE.exists():
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "ok",
-                "confidence": 0.0,
-                "lead_time_days": 21,
-                "zones": {
-                    "type": "FeatureCollection",
-                    "features": [],
-                },
+        return {
+            "status": "ok",
+            "confidence": 0.0,
+            "lead_time_days": 21,
+            "zones": {
+                "type": "FeatureCollection",
+                "features": [],
             },
-        )
+        }
 
     with open(ZONES_FILE) as f:
         zones = json.load(f)
@@ -49,9 +65,9 @@ def predict():
     }
 
 
-# -------------------------
-# 🔥 NEW HEATMAP ENDPOINT
-# -------------------------
+# =========================
+# 🔥 HEATMAP ENDPOINT
+# =========================
 @app.get("/heatmap")
 def heatmap():
     if not HEATMAP_FILE.exists():
