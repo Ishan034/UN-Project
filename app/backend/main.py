@@ -25,7 +25,7 @@ app.add_middleware(
 # =========================
 # PATHS
 # =========================
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parents[2]
 PRED_DIR = BASE_DIR / "data" / "predictions"
 
 ZONES_FILE = PRED_DIR / "migration_zones.geojson"
