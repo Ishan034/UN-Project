@@ -2,24 +2,17 @@ import React, { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-// 🔍 DEBUG: confirm token exists
-console.log(
-  "Mapbox token present:",
-  !!process.env.REACT_APP_MAPBOX_TOKEN
-);
-
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN;
 
 export default function MapView() {
   const mapContainerRef = useRef(null);
-  const mapRef = useRef(null);
+  const mapInitialized = useRef(false);
+  const mapInstance = useRef(null);
 
   const [confidence, setConfidence] = useState(null);
   const [leadTime, setLeadTime] = useState(null);
 
-  // -------------------------
   // Fetch metadata
-  // -------------------------
   useEffect(() => {
     fetch("https://un-project-4ajo.onrender.com/predict")
       .then((res) => res.json())
@@ -27,24 +20,15 @@ export default function MapView() {
         setConfidence(data.confidence);
         setLeadTime(data.lead_time_days);
       })
-      .catch((err) => {
-        console.error("Predict fetch failed:", err);
-      });
+      .catch(() => {});
   }, []);
 
-  // -------------------------
-  // Initialize map
-  // -------------------------
+  // Initialize Mapbox ONCE
   useEffect(() => {
-    if (mapRef.current) return;
+    if (mapInitialized.current) return;
     if (!mapContainerRef.current) return;
 
-    if (!mapboxgl.accessToken) {
-      console.error("❌ Mapbox token is missing");
-      return;
-    }
-
-    console.log("Initializing Mapbox map…");
+    mapInitialized.current = true;
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
@@ -56,81 +40,76 @@ export default function MapView() {
     map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
     map.on("load", () => {
-      console.log("Mapbox map loaded");
-
-      map.addSource("migration-heatmap", {
+      map.addSource("migration-pressure", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/heatmap",
       });
 
+      // 🔴 FROM
       map.addLayer({
-        id: "migration-heat",
+        id: "migration-source",
         type: "heatmap",
-        source: "migration-heatmap",
+        source: "migration-pressure",
+        filter: ["<", ["get", "pressure"], 0],
         paint: {
-          "heatmap-weight": [
-            "interpolate",
-            ["linear"],
-            ["get", "pressure"],
-            -0.2, 0,
-             0.0, 0.3,
-             0.2, 1
-          ],
-          "heatmap-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            5, 20,
-            7, 40,
-            9, 60
-          ],
-          "heatmap-opacity": 0.75,
+          "heatmap-weight": ["abs", ["get", "pressure"]],
+          "heatmap-radius": 40,
+          "heatmap-opacity": 0.8,
           "heatmap-color": [
             "interpolate",
             ["linear"],
             ["heatmap-density"],
-            0.0, "rgba(0,0,0,0)",
-            0.2, "#2c7bb6",
-            0.4, "#abd9e9",
-            0.6, "#ffffbf",
-            0.8, "#fdae61",
-            1.0, "#d7191c"
+            0, "rgba(0,0,0,0)",
+            0.5, "rgba(255,120,120,0.6)",
+            1, "rgba(180,0,0,0.95)",
+          ],
+        },
+      });
+
+      // 🟢 TO
+      map.addLayer({
+        id: "migration-destination",
+        type: "heatmap",
+        source: "migration-pressure",
+        filter: [">", ["get", "pressure"], 0],
+        paint: {
+          "heatmap-weight": ["get", "pressure"],
+          "heatmap-radius": 40,
+          "heatmap-opacity": 0.7,
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0, "rgba(0,0,0,0)",
+            0.5, "rgba(120,255,120,0.6)",
+            1, "rgba(0,140,0,0.95)",
           ],
         },
       });
     });
 
-    mapRef.current = map;
-
-    return () => map.remove();
+    mapInstance.current = map;
   }, []);
 
   return (
     <>
-      {/* 🗺️ MAP CONTAINER */}
       <div
         ref={mapContainerRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          bottom: 0,
-          width: "100%",
-        }}
+        style={{ position: "absolute", inset: 0 }}
       />
 
-      {/* 📊 INFO PANEL */}
       {confidence !== null && (
         <div
           style={{
             position: "absolute",
             bottom: 20,
             left: 20,
+            zIndex: 10,
             background: "white",
             padding: "12px 16px",
             borderRadius: "6px",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
             fontSize: "14px",
-            zIndex: 10,
           }}
         >
           <div><b>Confidence:</b> {confidence}</div>
