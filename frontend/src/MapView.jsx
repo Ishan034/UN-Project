@@ -2,17 +2,23 @@ import React, { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
+// 🔍 DEBUG: confirm token exists
+console.log(
+  "Mapbox token present:",
+  !!process.env.REACT_APP_MAPBOX_TOKEN
+);
+
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN;
 
 export default function MapView() {
-  const mapContainer = useRef(null);
+  const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
 
   const [confidence, setConfidence] = useState(null);
   const [leadTime, setLeadTime] = useState(null);
 
   // -------------------------
-  // Fetch metadata (confidence, lead time)
+  // Fetch metadata
   // -------------------------
   useEffect(() => {
     fetch("https://un-project-4ajo.onrender.com/predict")
@@ -21,7 +27,9 @@ export default function MapView() {
         setConfidence(data.confidence);
         setLeadTime(data.lead_time_days);
       })
-      .catch((err) => console.error(err));
+      .catch((err) => {
+        console.error("Predict fetch failed:", err);
+      });
   }, []);
 
   // -------------------------
@@ -29,29 +37,32 @@ export default function MapView() {
   // -------------------------
   useEffect(() => {
     if (mapRef.current) return;
+    if (!mapContainerRef.current) return;
+
+    if (!mapboxgl.accessToken) {
+      console.error("❌ Mapbox token is missing");
+      return;
+    }
+
+    console.log("Initializing Mapbox map…");
 
     const map = new mapboxgl.Map({
-      container: mapContainer.current,
+      container: mapContainerRef.current,
       style: "mapbox://styles/mapbox/light-v11",
       center: [30.8, 7.2],
       zoom: 6,
     });
 
     map.addControl(new mapboxgl.NavigationControl(), "top-right");
-    mapRef.current = map;
 
     map.on("load", () => {
-      // -------------------------
-      // Heatmap source
-      // -------------------------
+      console.log("Mapbox map loaded");
+
       map.addSource("migration-heatmap", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/heatmap",
       });
 
-      // -------------------------
-      // Heatmap layer
-      // -------------------------
       map.addLayer({
         id: "migration-heat",
         type: "heatmap",
@@ -89,18 +100,25 @@ export default function MapView() {
       });
     });
 
+    mapRef.current = map;
+
     return () => map.remove();
   }, []);
 
   return (
     <>
-      {/* Map */}
+      {/* 🗺️ MAP CONTAINER */}
       <div
-        ref={mapContainer}
-        style={{ width: "100%", height: "100vh" }}
+        ref={mapContainerRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          width: "100%",
+        }}
       />
 
-      {/* Info Panel */}
+      {/* 📊 INFO PANEL */}
       {confidence !== null && (
         <div
           style={{
@@ -112,6 +130,7 @@ export default function MapView() {
             borderRadius: "6px",
             boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
             fontSize: "14px",
+            zIndex: 10,
           }}
         >
           <div><b>Confidence:</b> {confidence}</div>
