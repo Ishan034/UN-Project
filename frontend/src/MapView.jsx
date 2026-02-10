@@ -8,144 +8,100 @@ export default function MapView() {
   const mapContainer = useRef(null);
   const mapRef = useRef(null);
 
-  const [zones, setZones] = useState(null);
   const [confidence, setConfidence] = useState(null);
   const [leadTime, setLeadTime] = useState(null);
-  const [error, setError] = useState(null);
 
-  /* ===============================
-     1️⃣ Fetch prediction (GET)
-     =============================== */
+  // -------------------------
+  // Fetch metadata (confidence, lead time)
+  // -------------------------
   useEffect(() => {
     fetch("https://un-project-4ajo.onrender.com/predict")
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`Backend error: ${res.status}`);
-        }
-        return res.json();
-      })
+      .then((res) => res.json())
       .then((data) => {
-        console.log("Prediction response:", data);
-        setZones(data.zones);
         setConfidence(data.confidence);
         setLeadTime(data.lead_time_days);
       })
-      .catch((err) => {
-        console.error(err);
-        setError("Failed to load prediction");
-      });
+      .catch((err) => console.error(err));
   }, []);
 
-  /* ===============================
-     2️⃣ Initialize map ONCE
-     =============================== */
+  // -------------------------
+  // Initialize map
+  // -------------------------
   useEffect(() => {
     if (mapRef.current) return;
 
-    mapRef.current = new mapboxgl.Map({
+    const map = new mapboxgl.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/light-v11",
-      center: [30.8, 7.2], // South Sudan
+      center: [30.8, 7.2],
       zoom: 6,
     });
 
-    mapRef.current.addControl(
-      new mapboxgl.NavigationControl(),
-      "top-right"
-    );
-  }, []);
+    map.addControl(new mapboxgl.NavigationControl(), "top-right");
+    mapRef.current = map;
 
-  /* ===============================
-     3️⃣ Add / update GeoJSON layers
-     =============================== */
-  useEffect(() => {
-    if (!zones || !mapRef.current) return;
-
-    const map = mapRef.current;
-
-    const addOrUpdateLayers = () => {
-      // Remove existing layers if any
-      if (map.getLayer("migration-source")) {
-        map.removeLayer("migration-source");
-      }
-      if (map.getLayer("migration-destination")) {
-        map.removeLayer("migration-destination");
-      }
-      if (map.getLayer("migration-outline")) {
-        map.removeLayer("migration-outline");
-      }
-      if (map.getSource("migration-zones")) {
-        map.removeSource("migration-zones");
-      }
-
-      // Add source
-      map.addSource("migration-zones", {
+    map.on("load", () => {
+      // -------------------------
+      // Heatmap source
+      // -------------------------
+      map.addSource("migration-heatmap", {
         type: "geojson",
-        data: zones,
+        data: "https://un-project-4ajo.onrender.com/heatmap",
       });
 
-      // 🔴 SOURCE ZONES
+      // -------------------------
+      // Heatmap layer
+      // -------------------------
       map.addLayer({
-        id: "migration-source",
-        type: "fill",
-        source: "migration-zones",
-        filter: ["==", ["get", "type"], "source"],
+        id: "migration-heat",
+        type: "heatmap",
+        source: "migration-heatmap",
         paint: {
-          "fill-color": "#d73027",
-          "fill-opacity": 0.55,
+          "heatmap-weight": [
+            "interpolate",
+            ["linear"],
+            ["get", "pressure"],
+            -0.2, 0,
+             0.0, 0.3,
+             0.2, 1
+          ],
+          "heatmap-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            5, 20,
+            7, 40,
+            9, 60
+          ],
+          "heatmap-opacity": 0.75,
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0.0, "rgba(0,0,0,0)",
+            0.2, "#2c7bb6",
+            0.4, "#abd9e9",
+            0.6, "#ffffbf",
+            0.8, "#fdae61",
+            1.0, "#d7191c"
+          ],
         },
       });
+    });
 
-      // 🟢 DESTINATION ZONES
-      map.addLayer({
-        id: "migration-destination",
-        type: "fill",
-        source: "migration-zones",
-        filter: ["==", ["get", "type"], "destination"],
-        paint: {
-          "fill-color": "#1a9850",
-          "fill-opacity": 0.55,
-        },
-      });
-
-      // Outline
-      map.addLayer({
-        id: "migration-outline",
-        type: "line",
-        source: "migration-zones",
-        paint: {
-          "line-color": "#333",
-          "line-width": 1,
-        },
-      });
-    };
-
-    if (map.isStyleLoaded()) {
-      addOrUpdateLayers();
-    } else {
-      map.once("load", addOrUpdateLayers);
-    }
-  }, [zones]);
-
-  /* ===============================
-     4️⃣ Derived UI state
-     =============================== */
-  const hasZones =
-    zones &&
-    zones.features &&
-    Array.isArray(zones.features) &&
-    zones.features.length > 0;
+    return () => map.remove();
+  }, []);
 
   return (
     <>
-      {/* 🗺️ MAP */}
+      {/* Map */}
       <div
         ref={mapContainer}
         style={{ width: "100%", height: "100vh" }}
       />
 
-      {/* 📊 INFO PANEL */}
-      {confidence !== null && !error && (
+      {/* Info Panel */}
+      {confidence !== null && (
         <div
           style={{
             position: "absolute",
@@ -156,36 +112,11 @@ export default function MapView() {
             borderRadius: "6px",
             boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
             fontSize: "14px",
-            maxWidth: "280px",
           }}
         >
           <div><b>Confidence:</b> {confidence}</div>
           <div><b>Lead time:</b> {leadTime} days</div>
-          <div>
-            <b>Status:</b>{" "}
-            {!hasZones
-              ? "No significant migration pressure detected"
-              : confidence < 0.6
-                ? "Low migration pressure detected"
-                : "Elevated migration risk"}
-          </div>
-        </div>
-      )}
-
-      {/* ❌ ERROR STATE */}
-      {error && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 20,
-            left: 20,
-            background: "#fee",
-            padding: "12px 16px",
-            borderRadius: "6px",
-            color: "#900",
-          }}
-        >
-          {error}
+          <div><b>Status:</b> Elevated migration pressure</div>
         </div>
       )}
     </>
