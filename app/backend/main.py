@@ -1,58 +1,67 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
-from datetime import datetime
 import json
+from datetime import datetime
 
 app = FastAPI()
 
-# =========================
-# CORS
-# =========================
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+BASE_DIR = Path(__file__).resolve().parent.parent
+PRED_DIR = BASE_DIR / "data" / "predictions"
 
-# =========================
-# PATHS
-# =========================
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-ZONES_FILE = PROJECT_ROOT / "data" / "predictions" / "migration_zones.geojson"
+ZONES_FILE = PRED_DIR / "migration_zones.geojson"
+HEATMAP_FILE = PRED_DIR / "migration_heatmap.geojson"
 
-LEAD_TIME_DAYS = 21
 
-# =========================
-# PREDICT ENDPOINT
-# =========================
-@app.api_route("/predict", methods=["GET", "POST"])
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
+
+# -------------------------
+# EXISTING PREDICT ENDPOINT
+# -------------------------
+@app.get("/predict")
 def predict():
     if not ZONES_FILE.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="No prediction available. Run offline inference first."
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ok",
+                "confidence": 0.0,
+                "lead_time_days": 21,
+                "zones": {
+                    "type": "FeatureCollection",
+                    "features": [],
+                },
+            },
         )
 
-    with open(ZONES_FILE, "r", encoding="utf-8") as f:
-        zones_geojson = json.load(f)
-
-    features = zones_geojson.get("features", [])
-
-    source_zones = sum(
-        1 for f in features if f["properties"].get("type") == "source"
-    )
-    destination_zones = sum(
-        1 for f in features if f["properties"].get("type") == "destination"
-    )
-
-    confidence = min(0.95, 0.5 + 0.05 * (source_zones + destination_zones))
+    with open(ZONES_FILE) as f:
+        zones = json.load(f)
 
     return {
         "status": "ok",
+        "confidence": 0.95,
+        "lead_time_days": 21,
         "last_updated": datetime.utcnow().isoformat() + "Z",
-        "lead_time_days": LEAD_TIME_DAYS,
-        "confidence": round(confidence, 2),
-        "zones": zones_geojson,
+        "zones": zones,
     }
+
+
+# -------------------------
+# 🔥 NEW HEATMAP ENDPOINT
+# -------------------------
+@app.get("/heatmap")
+def heatmap():
+    if not HEATMAP_FILE.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Heatmap not available"},
+        )
+
+    return FileResponse(
+        HEATMAP_FILE,
+        media_type="application/geo+json",
+        filename="migration_heatmap.geojson",
+    )
