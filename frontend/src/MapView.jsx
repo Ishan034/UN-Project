@@ -6,13 +6,17 @@ mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN;
 
 export default function MapView() {
   const mapContainerRef = useRef(null);
-  const mapInitialized = useRef(false);
-  const mapInstance = useRef(null);
+  const mapRef = useRef(null);
 
   const [confidence, setConfidence] = useState(null);
   const [leadTime, setLeadTime] = useState(null);
 
+  const [showSource, setShowSource] = useState(true);
+  const [showDestination, setShowDestination] = useState(true);
+
+  // -------------------------
   // Fetch metadata
+  // -------------------------
   useEffect(() => {
     fetch("https://un-project-4ajo.onrender.com/predict")
       .then((res) => res.json())
@@ -23,12 +27,12 @@ export default function MapView() {
       .catch(() => {});
   }, []);
 
-  // Initialize Mapbox ONCE
+  // -------------------------
+  // Initialize Mapbox once
+  // -------------------------
   useEffect(() => {
-    if (mapInitialized.current) return;
+    if (mapRef.current) return;
     if (!mapContainerRef.current) return;
-
-    mapInitialized.current = true;
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
@@ -45,7 +49,7 @@ export default function MapView() {
         data: "https://un-project-4ajo.onrender.com/heatmap",
       });
 
-      // 🔴 FROM
+      // 🔴 SOURCE
       map.addLayer({
         id: "migration-source",
         type: "heatmap",
@@ -66,7 +70,7 @@ export default function MapView() {
         },
       });
 
-      // 🟢 TO
+      // 🟢 DESTINATION
       map.addLayer({
         id: "migration-destination",
         type: "heatmap",
@@ -75,7 +79,7 @@ export default function MapView() {
         paint: {
           "heatmap-weight": ["get", "pressure"],
           "heatmap-radius": 40,
-          "heatmap-opacity": 0.7,
+          "heatmap-opacity": 0.75,
           "heatmap-color": [
             "interpolate",
             ["linear"],
@@ -88,8 +92,33 @@ export default function MapView() {
       });
     });
 
-    mapInstance.current = map;
+    mapRef.current = map;
   }, []);
+
+  // -------------------------
+  // Toggle visibility
+  // -------------------------
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const map = mapRef.current;
+
+    if (map.getLayer("migration-source")) {
+      map.setLayoutProperty(
+        "migration-source",
+        "visibility",
+        showSource ? "visible" : "none"
+      );
+    }
+
+    if (map.getLayer("migration-destination")) {
+      map.setLayoutProperty(
+        "migration-destination",
+        "visibility",
+        showDestination ? "visible" : "none"
+      );
+    }
+  }, [showSource, showDestination]);
 
   return (
     <>
@@ -98,6 +127,7 @@ export default function MapView() {
         style={{ position: "absolute", inset: 0 }}
       />
 
+      {/* INFO PANEL */}
       {confidence !== null && (
         <div
           style={{
@@ -117,6 +147,43 @@ export default function MapView() {
           <div><b>Status:</b> Elevated migration pressure</div>
         </div>
       )}
+
+      {/* LAYER CONTROL PANEL */}
+      <div
+        style={{
+          position: "absolute",
+          top: 20,
+          right: 20,
+          zIndex: 10,
+          background: "white",
+          padding: "12px",
+          borderRadius: "6px",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+          fontSize: "14px",
+        }}
+      >
+        <div>
+          <label>
+            <input
+              type="checkbox"
+              checked={showSource}
+              onChange={() => setShowSource(!showSource)}
+            />{" "}
+            🔴 Show Source
+          </label>
+        </div>
+
+        <div style={{ marginTop: "6px" }}>
+          <label>
+            <input
+              type="checkbox"
+              checked={showDestination}
+              onChange={() => setShowDestination(!showDestination)}
+            />{" "}
+            🟢 Show Destination
+          </label>
+        </div>
+      </div>
     </>
   );
 }
