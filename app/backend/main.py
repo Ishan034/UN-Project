@@ -8,15 +8,11 @@ from datetime import datetime
 app = FastAPI()
 
 # =========================
-# 🔓 ENABLE CORS (CRITICAL)
+# 🔓 ENABLE CORS
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",        # local React
-        "https://un-project-4ajo.onrender.com",  # deployed frontend (if any)
-        "*"                             # safe for demo / UN prototype
-    ],
+    allow_origins=["*"],  # Safe for demo / UN prototype
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,6 +26,8 @@ PRED_DIR = BASE_DIR / "data" / "predictions"
 
 ZONES_FILE = PRED_DIR / "migration_zones.geojson"
 HEATMAP_FILE = PRED_DIR / "migration_heatmap.geojson"
+NDVI_FILE = PRED_DIR / "ndvi_heatmap.geojson"
+RAIN_FILE = PRED_DIR / "rainfall_heatmap.geojson"
 
 
 @app.get("/")
@@ -66,7 +64,7 @@ def predict():
 
 
 # =========================
-# 🔥 HEATMAP ENDPOINT
+# 🔥 MIGRATION HEATMAP
 # =========================
 @app.get("/heatmap")
 def heatmap():
@@ -80,4 +78,40 @@ def heatmap():
         HEATMAP_FILE,
         media_type="application/geo+json",
         filename="migration_heatmap.geojson",
+    )
+
+
+# =========================
+# 🌱 NDVI LAYER
+# =========================
+@app.get("/ndvi")
+def ndvi():
+    if not NDVI_FILE.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "NDVI not available"},
+        )
+
+    return FileResponse(
+        NDVI_FILE,
+        media_type="application/geo+json",
+        filename="ndvi_heatmap.geojson",
+    )
+
+
+# =========================
+# 🌧 RAINFALL LAYER
+# =========================
+@app.get("/rainfall")
+def rainfall():
+    if not RAIN_FILE.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Rainfall not available"},
+        )
+
+    return FileResponse(
+        RAIN_FILE,
+        media_type="application/geo+json",
+        filename="rainfall_heatmap.geojson",
     )
