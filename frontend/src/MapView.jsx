@@ -185,5 +185,49 @@ export default function MapView() {
         </div>
       </div>
     </>
+    {/* LEGEND */}
+<div
+  style={{
+    position: "absolute",
+    bottom: 20,
+    right: 20,
+    zIndex: 10,
+    background: "white",
+    padding: "12px",
+    borderRadius: "6px",
+    boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+    fontSize: "13px",
+    width: "180px",
+  }}
+>
+  <div style={{ fontWeight: "bold", marginBottom: "6px" }}>
+    Migration Pressure
+  </div>
+
+  <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
+    <div style={{
+      width: "16px",
+      height: "16px",
+      background: "rgba(180,0,0,0.9)",
+      marginRight: "8px"
+    }} />
+    Source (From)
+  </div>
+
+  <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
+    <div style={{
+      width: "16px",
+      height: "16px",
+      background: "rgba(0,140,0,0.9)",
+      marginRight: "8px"
+    }} />
+    Destination (To)
+  </div>
+
+  <div style={{ marginTop: "8px", fontSize: "11px", color: "#555" }}>
+    Based on environmental change signals
+  </div>
+</div>
+
   );
 }
