@@ -13,9 +13,10 @@ export default function MapView() {
 
   const [showSource, setShowSource] = useState(true);
   const [showDestination, setShowDestination] = useState(true);
+  const [showNDVI, setShowNDVI] = useState(false);
 
   // -------------------------
-  // Fetch metadata
+  // Fetch prediction metadata
   // -------------------------
   useEffect(() => {
     fetch("https://un-project-4ajo.onrender.com/predict")
@@ -28,11 +29,10 @@ export default function MapView() {
   }, []);
 
   // -------------------------
-  // Initialize Mapbox once
+  // Initialize Mapbox
   // -------------------------
   useEffect(() => {
-    if (mapRef.current) return;
-    if (!mapContainerRef.current) return;
+    if (mapRef.current || !mapContainerRef.current) return;
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
@@ -44,6 +44,9 @@ export default function MapView() {
     map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
     map.on("load", () => {
+      // =============================
+      // Migration Pressure
+      // =============================
       map.addSource("migration-pressure", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/heatmap",
@@ -65,7 +68,7 @@ export default function MapView() {
             ["heatmap-density"],
             0, "rgba(0,0,0,0)",
             0.5, "rgba(255,120,120,0.6)",
-            1, "rgba(180,0,0,0.95)",
+            1, "rgba(180,0,0,0.95)"
           ],
         },
       });
@@ -86,22 +89,49 @@ export default function MapView() {
             ["heatmap-density"],
             0, "rgba(0,0,0,0)",
             0.5, "rgba(120,255,120,0.6)",
-            1, "rgba(0,140,0,0.95)",
+            1, "rgba(0,140,0,0.95)"
           ],
         },
       });
-    });
 
-    mapRef.current = map;
+      // =============================
+      // NDVI Layer
+      // =============================
+      map.addSource("ndvi-layer", {
+        type: "geojson",
+        data: "https://un-project-4ajo.onrender.com/ndvi",
+      });
+
+      map.addLayer({
+        id: "ndvi-heat",
+        type: "heatmap",
+        source: "ndvi-layer",
+        paint: {
+          "heatmap-weight": ["get", "ndvi"],
+          "heatmap-radius": 35,
+          "heatmap-opacity": 0.6,
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0, "rgba(0,0,0,0)",
+            0.4, "#ffffbf",
+            0.7, "#a6d96a",
+            1, "#1a9850"
+          ],
+        },
+      });
+
+      mapRef.current = map;
+    });
   }, []);
 
   // -------------------------
-  // Toggle visibility
+  // Toggle Layer Visibility
   // -------------------------
   useEffect(() => {
-    if (!mapRef.current) return;
-
     const map = mapRef.current;
+    if (!map) return;
 
     if (map.getLayer("migration-source")) {
       map.setLayoutProperty(
@@ -118,10 +148,20 @@ export default function MapView() {
         showDestination ? "visible" : "none"
       );
     }
-  }, [showSource, showDestination]);
+
+    if (map.getLayer("ndvi-heat")) {
+      map.setLayoutProperty(
+        "ndvi-heat",
+        "visibility",
+        showNDVI ? "visible" : "none"
+      );
+    }
+
+  }, [showSource, showDestination, showNDVI]);
 
   return (
     <>
+      {/* MAP */}
       <div
         ref={mapContainerRef}
         style={{ position: "absolute", inset: 0 }}
@@ -168,8 +208,17 @@ export default function MapView() {
               type="checkbox"
               checked={showSource}
               onChange={() => setShowSource(!showSource)}
-            />{" "}
-            🔴 Show Source
+            /> 🔴 Source
+          </label>
+        </div>
+
+        <div>
+          <label>
+            <input
+              type="checkbox"
+              checked={showDestination}
+              onChange={() => setShowDestination(!showDestination)}
+            /> 🟢 Destination
           </label>
         </div>
 
@@ -177,57 +226,66 @@ export default function MapView() {
           <label>
             <input
               type="checkbox"
-              checked={showDestination}
-              onChange={() => setShowDestination(!showDestination)}
-            />{" "}
-            🟢 Show Destination
+              checked={showNDVI}
+              onChange={() => setShowNDVI(!showNDVI)}
+            /> 🌱 NDVI
           </label>
         </div>
       </div>
+
+      {/* LEGEND PANEL */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 20,
+          right: 20,
+          zIndex: 10,
+          background: "white",
+          padding: "12px",
+          borderRadius: "6px",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+          fontSize: "13px",
+          width: "200px",
+        }}
+      >
+        <div style={{ fontWeight: "bold", marginBottom: "6px" }}>
+          Legend
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
+          <div style={{
+            width: "16px",
+            height: "16px",
+            background: "rgba(180,0,0,0.95)",
+            marginRight: "8px"
+          }} />
+          Migration Source (From)
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
+          <div style={{
+            width: "16px",
+            height: "16px",
+            background: "rgba(0,140,0,0.95)",
+            marginRight: "8px"
+          }} />
+          Migration Destination (To)
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
+          <div style={{
+            width: "16px",
+            height: "16px",
+            background: "#1a9850",
+            marginRight: "8px"
+          }} />
+          High Vegetation (NDVI)
+        </div>
+
+        <div style={{ marginTop: "8px", fontSize: "11px", color: "#555" }}>
+          Based on environmental change signals
+        </div>
+      </div>
     </>
-    {/* LEGEND */}
-<div
-  style={{
-    position: "absolute",
-    bottom: 20,
-    right: 20,
-    zIndex: 10,
-    background: "white",
-    padding: "12px",
-    borderRadius: "6px",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
-    fontSize: "13px",
-    width: "180px",
-  }}
->
-  <div style={{ fontWeight: "bold", marginBottom: "6px" }}>
-    Migration Pressure
-  </div>
-
-  <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
-    <div style={{
-      width: "16px",
-      height: "16px",
-      background: "rgba(180,0,0,0.9)",
-      marginRight: "8px"
-    }} />
-    Source (From)
-  </div>
-
-  <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
-    <div style={{
-      width: "16px",
-      height: "16px",
-      background: "rgba(0,140,0,0.9)",
-      marginRight: "8px"
-    }} />
-    Destination (To)
-  </div>
-
-  <div style={{ marginTop: "8px", fontSize: "11px", color: "#555" }}>
-    Based on environmental change signals
-  </div>
-</div>
-
   );
 }
