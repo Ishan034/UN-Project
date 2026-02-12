@@ -14,10 +14,11 @@ export default function MapView() {
   const [showSource, setShowSource] = useState(true);
   const [showDestination, setShowDestination] = useState(true);
   const [showNDVI, setShowNDVI] = useState(false);
+  const [showRain, setShowRain] = useState(false);
 
-  // -------------------------
+  // ============================
   // Fetch prediction metadata
-  // -------------------------
+  // ============================
   useEffect(() => {
     fetch("https://un-project-4ajo.onrender.com/predict")
       .then((res) => res.json())
@@ -25,12 +26,12 @@ export default function MapView() {
         setConfidence(data.confidence);
         setLeadTime(data.lead_time_days);
       })
-      .catch(() => {});
+      .catch((err) => console.error("Prediction error:", err));
   }, []);
 
-  // -------------------------
-  // Initialize Mapbox
-  // -------------------------
+  // ============================
+  // Initialize Map
+  // ============================
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return;
 
@@ -44,9 +45,9 @@ export default function MapView() {
     map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
     map.on("load", () => {
-      // =============================
+      // ========================
       // Migration Pressure
-      // =============================
+      // ========================
       map.addSource("migration-pressure", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/heatmap",
@@ -94,9 +95,9 @@ export default function MapView() {
         },
       });
 
-      // =============================
-      // NDVI Layer
-      // =============================
+      // ========================
+      // NDVI Layer (Circle for clarity)
+      // ========================
       map.addSource("ndvi-layer", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/ndvi",
@@ -104,60 +105,75 @@ export default function MapView() {
 
       map.addLayer({
         id: "ndvi-heat",
-        type: "heatmap",
+        type: "circle",
         source: "ndvi-layer",
         paint: {
-          "heatmap-weight": ["get", "ndvi"],
-          "heatmap-radius": 35,
-          "heatmap-opacity": 0.6,
-          "heatmap-color": [
+          "circle-radius": 3,
+          "circle-opacity": 0.7,
+          "circle-color": [
             "interpolate",
             ["linear"],
-            ["heatmap-density"],
-            0, "rgba(0,0,0,0)",
-            0.4, "#ffffbf",
-            0.7, "#a6d96a",
-            1, "#1a9850"
-          ],
-        },
+            ["get", "ndvi"],
+            -0.2, "#d7191c",
+            0, "#ffffbf",
+            0.3, "#1a9850"
+          ]
+        }
+      });
+
+      // ========================
+      // Rainfall Layer (Circle)
+      // ========================
+      map.addSource("rain-layer", {
+        type: "geojson",
+        data: "https://un-project-4ajo.onrender.com/rainfall",
+      });
+
+      map.addLayer({
+        id: "rain-heat",
+        type: "circle",
+        source: "rain-layer",
+        paint: {
+          "circle-radius": 3,
+          "circle-opacity": 0.6,
+          "circle-color": [
+            "interpolate",
+            ["linear"],
+            ["get", "rain"],
+            0, "#ffffcc",
+            50, "#41b6c4",
+            150, "#253494"
+          ]
+        }
       });
 
       mapRef.current = map;
     });
   }, []);
 
-  // -------------------------
-  // Toggle Layer Visibility
-  // -------------------------
+  // ============================
+  // Toggle Logic
+  // ============================
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    if (map.getLayer("migration-source")) {
-      map.setLayoutProperty(
-        "migration-source",
-        "visibility",
-        showSource ? "visible" : "none"
-      );
-    }
+    const toggleLayer = (layerId, visible) => {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(
+          layerId,
+          "visibility",
+          visible ? "visible" : "none"
+        );
+      }
+    };
 
-    if (map.getLayer("migration-destination")) {
-      map.setLayoutProperty(
-        "migration-destination",
-        "visibility",
-        showDestination ? "visible" : "none"
-      );
-    }
+    toggleLayer("migration-source", showSource);
+    toggleLayer("migration-destination", showDestination);
+    toggleLayer("ndvi-heat", showNDVI);
+    toggleLayer("rain-heat", showRain);
 
-    if (map.getLayer("ndvi-heat")) {
-      map.setLayoutProperty(
-        "ndvi-heat",
-        "visibility",
-        showNDVI ? "visible" : "none"
-      );
-    }
-
-  }, [showSource, showDestination, showNDVI]);
+  }, [showSource, showDestination, showNDVI, showRain]);
 
   return (
     <>
@@ -188,7 +204,7 @@ export default function MapView() {
         </div>
       )}
 
-      {/* LAYER CONTROL PANEL */}
+      {/* LAYER CONTROLS */}
       <div
         style={{
           position: "absolute",
@@ -222,7 +238,7 @@ export default function MapView() {
           </label>
         </div>
 
-        <div style={{ marginTop: "6px" }}>
+        <div>
           <label>
             <input
               type="checkbox"
@@ -231,9 +247,19 @@ export default function MapView() {
             /> 🌱 NDVI
           </label>
         </div>
+
+        <div>
+          <label>
+            <input
+              type="checkbox"
+              checked={showRain}
+              onChange={() => setShowRain(!showRain)}
+            /> 🌧 Rainfall
+          </label>
+        </div>
       </div>
 
-      {/* LEGEND PANEL */}
+      {/* LEGEND */}
       <div
         style={{
           position: "absolute",
@@ -252,38 +278,24 @@ export default function MapView() {
           Legend
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
-          <div style={{
-            width: "16px",
-            height: "16px",
-            background: "rgba(180,0,0,0.95)",
-            marginRight: "8px"
-          }} />
-          Migration Source (From)
+        <div style={{ marginBottom: "4px" }}>
+          🔴 Migration Source (From)
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
-          <div style={{
-            width: "16px",
-            height: "16px",
-            background: "rgba(0,140,0,0.95)",
-            marginRight: "8px"
-          }} />
-          Migration Destination (To)
+        <div style={{ marginBottom: "4px" }}>
+          🟢 Migration Destination (To)
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", marginBottom: "4px" }}>
-          <div style={{
-            width: "16px",
-            height: "16px",
-            background: "#1a9850",
-            marginRight: "8px"
-          }} />
-          High Vegetation (NDVI)
+        <div style={{ marginBottom: "4px" }}>
+          🌱 NDVI Vegetation Health
+        </div>
+
+        <div style={{ marginBottom: "4px" }}>
+          🌧 Rainfall Intensity
         </div>
 
         <div style={{ marginTop: "8px", fontSize: "11px", color: "#555" }}>
-          Based on environmental change signals
+          Environmental layers influencing migration
         </div>
       </div>
     </>
