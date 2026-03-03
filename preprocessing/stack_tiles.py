@@ -1,8 +1,8 @@
 """
 Tile tensor stacker (PyTorch) — V2 TEMPORAL NDVI SAFE
 ---------------------------------------------------
-Stacks ΔNDVI + Rainfall tiles without destroying
-temporal signal.
+Stacks ΔNDVI + Rainfall (+ optional ACLED conflict density)
+tiles without destroying temporal signal.
 
 Fixes:
 - Uses ndvi_delta_1km.tif explicitly
@@ -16,7 +16,6 @@ import torch
 import numpy as np
 import rasterio
 import geopandas as gpd
-from rasterio.windows import Window
 from rasterio.warp import reproject, Resampling
 
 # =========================
@@ -28,10 +27,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # CONFIG
 # =========================
 TILE_SIZE = 64  # pixels (1 km per pixel)
-TARGET_CRS = "EPSG:3857"
-
 NDVI_PATH = PROJECT_ROOT / "data/processed/ndvi_delta_1km.tif"
 RAIN_PATH = PROJECT_ROOT / "data/processed/rainfall_30d_1km.tif"
+ACLED_PATH = PROJECT_ROOT / "data/processed/acled_events_90d_1km.tif"
 BOUNDARY_PATH = PROJECT_ROOT / "data/boundaries/south_sudan.shp"
 OUTPUT_DIR = PROJECT_ROOT / "data/tensors"
 
@@ -90,6 +88,21 @@ def stack_tiles():
             rainfall_data = rain_src.read(1).astype(np.float32)
 
         # -------------------------
+        # Optional ACLED layer
+        # -------------------------
+        acled_data = None
+        if ACLED_PATH.exists():
+            print(f"Loading ACLED raster: {ACLED_PATH.name}")
+            with rasterio.open(ACLED_PATH) as acled_src:
+                if acled_src.transform != ndvi_src.transform or acled_src.crs != ndvi_src.crs:
+                    print("Reprojecting ACLED to match NDVI grid...")
+                    acled_data = reproject_to_match(acled_src, ndvi_src)
+                else:
+                    acled_data = acled_src.read(1).astype(np.float32)
+        else:
+            print("ACLED raster not found; continuing with 2-channel tensors.")
+
+        # -------------------------
         # Boundary in NDVI CRS
         # -------------------------
         boundary = gpd.read_file(BOUNDARY_PATH, engine="fiona").to_crs(ndvi_src.crs)
@@ -126,10 +139,12 @@ def stack_tiles():
                 if np.nanstd(ndvi_patch) < 0.01:
                     continue
 
-                tensor = torch.tensor(
-                    np.stack([ndvi_patch, rain_patch]),
-                    dtype=torch.float32,
-                )
+                layers = [ndvi_patch, rain_patch]
+                if acled_data is not None:
+                    acled_patch = acled_data[row : row + TILE_SIZE, col : col + TILE_SIZE]
+                    layers.append(acled_patch)
+
+                tensor = torch.tensor(np.stack(layers), dtype=torch.float32)
 
                 torch.save(tensor, OUTPUT_DIR / f"tile_{tile_id}.pt")
                 tile_id += 1

@@ -28,6 +28,7 @@ ZONES_FILE = PRED_DIR / "migration_zones.geojson"
 HEATMAP_FILE = PRED_DIR / "migration_heatmap.geojson"
 NDVI_FILE = PRED_DIR / "ndvi_heatmap.geojson"
 RAIN_FILE = PRED_DIR / "rainfall_heatmap.geojson"
+ACLED_FILE = PRED_DIR / "acled_heatmap.geojson"
 
 
 @app.get("/")
@@ -114,4 +115,22 @@ def rainfall():
         RAIN_FILE,
         media_type="application/geo+json",
         filename="rainfall_heatmap.geojson",
+    )
+
+
+# =========================
+# ⚠️ ACLED LAYER
+# =========================
+@app.get("/acled")
+def acled():
+    if not ACLED_FILE.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "ACLED layer not available"},
+        )
+
+    return FileResponse(
+        ACLED_FILE,
+        media_type="application/geo+json",
+        filename="acled_heatmap.geojson",
     )

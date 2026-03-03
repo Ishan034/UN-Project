@@ -27,10 +27,10 @@ TILE_SIZE = 64
 # MODEL (MUST MATCH TRAINING)
 # =========================
 class NDVIChangeCNN(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels: int):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(2, 16, 3, padding=1),
+            nn.Conv2d(in_channels, 16, 3, padding=1),
             nn.ReLU(),
             nn.Conv2d(16, 32, 3, padding=1),
             nn.ReLU(),
@@ -43,9 +43,22 @@ class NDVIChangeCNN(nn.Module):
 # =========================
 # LOAD MODEL
 # =========================
-model = NDVIChangeCNN().to(DEVICE)
+tile_files = sorted(TENSOR_DIR.glob("tile_*.pt"))
+if len(tile_files) == 0:
+    raise RuntimeError(f"No tensors found in {TENSOR_DIR}")
+
+sample_tensor = torch.load(tile_files[0])
+in_channels = int(sample_tensor.shape[0])
+
+model = NDVIChangeCNN(in_channels=in_channels).to(DEVICE)
 state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
-model.load_state_dict(state_dict)
+try:
+    model.load_state_dict(state_dict)
+except RuntimeError as exc:
+    raise RuntimeError(
+        "Model weights are incompatible with tensor channel count. "
+        "Regenerate tensors and retrain the model before running inference."
+    ) from exc
 model.eval()
 
 # =========================
@@ -64,7 +77,6 @@ pressure_count = np.zeros((height, width), dtype=np.float32)
 # =========================
 print("Running inference...")
 
-tile_files = sorted(TENSOR_DIR.glob("tile_*.pt"))
 tiles_per_row = width // TILE_SIZE
 
 for tile_file in tile_files:

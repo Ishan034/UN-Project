@@ -35,11 +35,10 @@ class TileDataset(Dataset):
         return len(self.files)
 
     def __getitem__(self, idx):
-        x = torch.load(self.files[idx]).float()  # [2, 64, 64]
+        x = torch.load(self.files[idx]).float()  # [C, 64, 64]
 
         # 🔧 CLEAN INPUT
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        x = torch.clamp(x, 0.0, 1.0)
 
         # NDVI channel
         ndvi = x[0]
@@ -57,10 +56,10 @@ class TileDataset(Dataset):
 # MODEL
 # =========================
 class MigrationCNN(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels: int):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(2, 16, 3, padding=1),
+            nn.Conv2d(in_channels, 16, 3, padding=1),
             nn.ReLU(),
             nn.Conv2d(16, 32, 3, padding=1),
             nn.ReLU(),
@@ -75,6 +74,9 @@ class MigrationCNN(nn.Module):
 # =========================
 def train():
     dataset = TileDataset(TENSOR_DIR)
+    sample_x, _ = dataset[0]
+    in_channels = sample_x.shape[0]
+
     loader = DataLoader(
         dataset,
         batch_size=8,
@@ -82,11 +84,11 @@ def train():
         drop_last=True
     )
 
-    model = MigrationCNN()
+    model = MigrationCNN(in_channels=in_channels)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.MSELoss()
 
-    print(f"Training on {len(dataset)} tiles")
+    print(f"Training on {len(dataset)} tiles with {in_channels} input channels")
 
     for epoch in range(5):
         total_loss = 0.0

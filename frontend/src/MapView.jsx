@@ -15,6 +15,7 @@ export default function MapView() {
   const [showDestination, setShowDestination] = useState(true);
   const [showNDVI, setShowNDVI] = useState(false);
   const [showRain, setShowRain] = useState(false);
+  const [showACLED, setShowACLED] = useState(false);
 
   // ============================
   // Fetch prediction metadata
@@ -147,6 +148,33 @@ export default function MapView() {
         }
       });
 
+
+      // ========================
+      // ACLED Layer (Circle)
+      // ========================
+      map.addSource("acled-layer", {
+        type: "geojson",
+        data: "https://un-project-4ajo.onrender.com/acled",
+      });
+
+      map.addLayer({
+        id: "acled-heat",
+        type: "circle",
+        source: "acled-layer",
+        paint: {
+          "circle-radius": 3,
+          "circle-opacity": 0.7,
+          "circle-color": [
+            "interpolate",
+            ["linear"],
+            ["get", "acled"],
+            0, "#fff5f0",
+            0.4, "#fb6a4a",
+            1, "#67000d"
+          ]
+        }
+      });
+
       mapRef.current = map;
     });
   }, []);
@@ -172,8 +200,9 @@ export default function MapView() {
     toggleLayer("migration-destination", showDestination);
     toggleLayer("ndvi-heat", showNDVI);
     toggleLayer("rain-heat", showRain);
+    toggleLayer("acled-heat", showACLED);
 
-  }, [showSource, showDestination, showNDVI, showRain]);
+  }, [showSource, showDestination, showNDVI, showRain, showACLED]);
 
   return (
     <>
@@ -257,6 +286,16 @@ export default function MapView() {
             /> 🌧 Rainfall
           </label>
         </div>
+
+        <div>
+          <label>
+            <input
+              type="checkbox"
+              checked={showACLED}
+              onChange={() => setShowACLED(!showACLED)}
+            /> ⚠️ ACLED Conflict
+          </label>
+        </div>
       </div>
 
       {/* LEGEND */}
@@ -292,6 +331,10 @@ export default function MapView() {
 
         <div style={{ marginBottom: "4px" }}>
           🌧 Rainfall Intensity
+        </div>
+
+        <div style={{ marginBottom: "4px" }}>
+          ⚠️ ACLED Conflict Intensity
         </div>
 
         <div style={{ marginTop: "8px", fontSize: "11px", color: "#555" }}>
