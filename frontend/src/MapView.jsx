@@ -15,6 +15,7 @@ export default function MapView() {
   const [showDestination, setShowDestination] = useState(true);
   const [showNDVI, setShowNDVI] = useState(false);
   const [showRain, setShowRain] = useState(false);
+  const [showConflict, setShowConflict] = useState(false);
 
   // ============================
   // Fetch prediction metadata
@@ -45,6 +46,7 @@ export default function MapView() {
     map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
     map.on("load", () => {
+
       // ========================
       // Migration Pressure
       // ========================
@@ -53,7 +55,6 @@ export default function MapView() {
         data: "https://un-project-4ajo.onrender.com/heatmap",
       });
 
-      // 🔴 SOURCE
       map.addLayer({
         id: "migration-source",
         type: "heatmap",
@@ -74,7 +75,6 @@ export default function MapView() {
         },
       });
 
-      // 🟢 DESTINATION
       map.addLayer({
         id: "migration-destination",
         type: "heatmap",
@@ -96,7 +96,7 @@ export default function MapView() {
       });
 
       // ========================
-      // NDVI Layer (Circle for clarity)
+      // NDVI Layer
       // ========================
       map.addSource("ndvi-layer", {
         type: "geojson",
@@ -122,7 +122,7 @@ export default function MapView() {
       });
 
       // ========================
-      // Rainfall Layer (Circle)
+      // Rainfall Layer
       // ========================
       map.addSource("rain-layer", {
         type: "geojson",
@@ -145,6 +145,35 @@ export default function MapView() {
             150, "#253494"
           ]
         }
+      });
+
+      // ========================
+      // Conflict Layer (ACLED/UCDP)
+      // ========================
+      map.addSource("conflict-layer", {
+        type: "geojson",
+        data: "https://un-project-4ajo.onrender.com/conflict",
+      });
+
+      map.addLayer({
+        id: "conflict-heat",
+        type: "heatmap",
+        source: "conflict-layer",
+        paint: {
+          "heatmap-weight": ["get", "weight"],
+          "heatmap-radius": 35,
+          "heatmap-opacity": 0.8,
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0, "rgba(0,0,0,0)",
+            0.4, "orange",
+            0.7, "red",
+            1, "darkred"
+          ],
+        },
+        layout: { visibility: "none" }
       });
 
       mapRef.current = map;
@@ -172,16 +201,13 @@ export default function MapView() {
     toggleLayer("migration-destination", showDestination);
     toggleLayer("ndvi-heat", showNDVI);
     toggleLayer("rain-heat", showRain);
+    toggleLayer("conflict-heat", showConflict);
 
-  }, [showSource, showDestination, showNDVI, showRain]);
+  }, [showSource, showDestination, showNDVI, showRain, showConflict]);
 
   return (
     <>
-      {/* MAP */}
-      <div
-        ref={mapContainerRef}
-        style={{ position: "absolute", inset: 0 }}
-      />
+      <div ref={mapContainerRef} style={{ position: "absolute", inset: 0 }} />
 
       {/* INFO PANEL */}
       {confidence !== null && (
@@ -218,6 +244,7 @@ export default function MapView() {
           fontSize: "14px",
         }}
       >
+
         <div>
           <label>
             <input
@@ -257,6 +284,17 @@ export default function MapView() {
             /> 🌧 Rainfall
           </label>
         </div>
+
+        <div>
+          <label>
+            <input
+              type="checkbox"
+              checked={showConflict}
+              onChange={() => setShowConflict(!showConflict)}
+            /> ⚔ Conflict
+          </label>
+        </div>
+
       </div>
 
       {/* LEGEND */}
@@ -278,24 +316,14 @@ export default function MapView() {
           Legend
         </div>
 
-        <div style={{ marginBottom: "4px" }}>
-          🔴 Migration Source (From)
-        </div>
-
-        <div style={{ marginBottom: "4px" }}>
-          🟢 Migration Destination (To)
-        </div>
-
-        <div style={{ marginBottom: "4px" }}>
-          🌱 NDVI Vegetation Health
-        </div>
-
-        <div style={{ marginBottom: "4px" }}>
-          🌧 Rainfall Intensity
-        </div>
+        <div>🔴 Migration Source</div>
+        <div>🟢 Migration Destination</div>
+        <div>🌱 NDVI Vegetation</div>
+        <div>🌧 Rainfall</div>
+        <div>⚔ Conflict Events</div>
 
         <div style={{ marginTop: "8px", fontSize: "11px", color: "#555" }}>
-          Environmental layers influencing migration
+          Environmental & conflict drivers influencing migration
         </div>
       </div>
     </>
