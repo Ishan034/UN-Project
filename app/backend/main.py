@@ -115,3 +115,18 @@ def rainfall():
         media_type="application/geo+json",
         filename="rainfall_heatmap.geojson",
     )
+CONFLICT_FILE = PRED_DIR / "conflict_heatmap.geojson"
+
+@app.get("/conflict")
+def conflict():
+    if not CONFLICT_FILE.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Conflict data not available"},
+        )
+
+    return FileResponse(
+        CONFLICT_FILE,
+        media_type="application/geo+json",
+        filename="conflict_heatmap.geojson",
+    )
