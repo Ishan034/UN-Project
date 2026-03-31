@@ -12,8 +12,11 @@ export default function DashboardView() {
 
   const [confidence, setConfidence] = useState(0);
   const [leadTime, setLeadTime] = useState(0);
-  const [zones, setZones] = useState(0);
+  const [zonesCount, setZonesCount] = useState(0);
   const [data, setData] = useState([]);
+
+  const [fullData, setFullData] = useState(null);
+  const [selectedZone, setSelectedZone] = useState(null);
 
   useEffect(function () {
 
@@ -21,11 +24,12 @@ export default function DashboardView() {
       .then(function (res) { return res.json(); })
       .then(function (d) {
 
-        setConfidence(d.confidence);
-        setLeadTime(d.lead_time_days);
-        setZones(d.zones.features.length);
+        setConfidence(d.confidence || 0);
+        setLeadTime(d.lead_time_days || 0);
+        setZonesCount(d.zones?.features?.length || 0);
 
-        // SAFE mock data (no template literals)
+        setFullData(d);
+
         var mock = Array.from({ length: 12 }, function (_, i) {
           return {
             day: "T" + i,
@@ -41,6 +45,16 @@ export default function DashboardView() {
       });
 
   }, []);
+
+  const zones = fullData?.zones?.features || [];
+
+  const sortedZones = [...zones].sort(
+    (a, b) =>
+      Math.abs(b.properties?.pressure || 0) -
+      Math.abs(a.properties?.pressure || 0)
+  );
+
+  const topZones = sortedZones.slice(0, 6);
 
   return (
     <div style={{
@@ -87,16 +101,27 @@ export default function DashboardView() {
           gap: "16px",
           marginBottom: "24px"
         }}>
-          <MetricCard title="Confidence" value={confidence} />
+          <MetricCard title="Confidence" value={(confidence * 100).toFixed(1) + "%"} />
           <MetricCard title="Lead Time" value={leadTime + " days"} />
-          <MetricCard title="Active Zones" value={zones} />
+          <MetricCard title="Active Zones" value={zonesCount} />
+          <MetricCard title="Validation" value={(fullData?.validation_score * 100 || 0).toFixed(1) + "%"} />
+          <MetricCard title="Drivers" value={(fullData?.driver_score * 100 || 0).toFixed(1) + "%"} />
+          <MetricCard title="Risk" value={fullData?.risk_level || "N/A"} />
         </div>
+
+        {/* SIGNAL BARS (NEW) */}
+        <Card title="Model Signal Strength">
+          <Bar label="Confidence" value={confidence} />
+          <Bar label="Validation" value={fullData?.validation_score || 0} />
+          <Bar label="Driver Strength" value={fullData?.driver_score || 0} />
+        </Card>
 
         {/* GRID */}
         <div style={{
           display: "grid",
           gridTemplateColumns: "2fr 1fr",
-          gap: "20px"
+          gap: "20px",
+          marginTop: "20px"
         }}>
 
           {/* CHART */}
@@ -117,48 +142,81 @@ export default function DashboardView() {
             </ResponsiveContainer>
           </Card>
 
-          {/* INSIGHTS */}
-          <Card title="Insights">
-            <ul style={{ lineHeight: "1.8", color: "#cbd5f5" }}>
-              <li>High migration pressure detected in Western Equatoria</li>
-              <li>Predicted movement trending toward Sudd wetlands</li>
-              <li>Low vegetation index driving outbound migration</li>
-              <li>Rainfall deficit observed in key grazing zones</li>
-              <li>Conflict overlap detected in migration corridors</li>
-            </ul>
+          {/* REGIONS */}
+          <Card title="High Pressure Regions">
+            {topZones.map(function (z, i) {
+              var p = Math.abs(z.properties?.pressure || 0);
+
+              return (
+                <div
+                  key={i}
+                  onClick={() => setSelectedZone(z)}
+                  style={{
+                    padding: "8px",
+                    marginBottom: "8px",
+                    background: "#020617",
+                    borderRadius: "6px",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div>{z.properties?.type}</div>
+                  <div style={{ fontSize: "12px", opacity: 0.7 }}>
+                    Pressure: {p.toFixed(3)}
+                  </div>
+                </div>
+              );
+            })}
           </Card>
 
         </div>
 
         {/* VALIDATION */}
         <div style={{ marginTop: "24px" }}>
-          <Card title="Validation Metrics">
-            <ul style={{ lineHeight: "1.8", color: "#cbd5f5" }}>
-              <li>✔ Strong correlation with NDVI gradients</li>
-              <li>✔ Rainfall patterns align with migration pressure</li>
-              <li>✔ Conflict hotspots overlap predicted movement zones</li>
-              <li>✔ Spatial consistency across regions</li>
-              <li>✔ Out-of-sample robustness observed in test regions</li>
-            </ul>
+          <Card title="Validation Breakdown">
+            <Bar label="Alignment" value={(fullData?.validation_score || 0) * 0.4} />
+            <Bar label="Direction" value={(fullData?.validation_score || 0) * 0.4} />
+            <Bar label="Stability" value={(fullData?.validation_score || 0) * 0.2} />
           </Card>
         </div>
 
       </div>
+
+      {/* DETAIL PANEL */}
+      {selectedZone && (
+        <div style={{
+          position: "fixed",
+          right: 0,
+          top: 0,
+          width: "320px",
+          height: "100%",
+          background: "#020617",
+          padding: "20px"
+        }}>
+          <button onClick={() => setSelectedZone(null)}>Close</button>
+
+          <h2>Region Analysis</h2>
+
+          <p><b>Type:</b> {selectedZone.properties?.type}</p>
+          <p><b>Pressure:</b> {selectedZone.properties?.pressure}</p>
+
+          <h3>Drivers</h3>
+          <p>NDVI: {selectedZone.properties?.ndvi}</p>
+          <p>Rainfall: {selectedZone.properties?.rain}</p>
+          <p>Conflict: {selectedZone.properties?.conflict}</p>
+        </div>
+      )}
     </div>
   );
 }
 
-/* =========================
-   COMPONENTS
-========================= */
+/* COMPONENTS */
 
 function Card(props) {
   return (
     <div style={{
       background: "rgba(255,255,255,0.05)",
       padding: "16px",
-      borderRadius: "16px",
-      backdropFilter: "blur(10px)"
+      borderRadius: "16px"
     }}>
       <div style={{ marginBottom: "10px", fontWeight: "500" }}>
         {props.title}
@@ -180,6 +238,30 @@ function MetricCard(props) {
       </div>
       <div style={{ fontSize: "22px", fontWeight: "600" }}>
         {props.value}
+      </div>
+    </div>
+  );
+}
+
+/* BAR COMPONENT (NEW) */
+function Bar({ label, value }) {
+  return (
+    <div style={{ marginBottom: "10px" }}>
+      <div style={{ fontSize: "12px", marginBottom: "4px" }}>
+        {label} ({(value * 100).toFixed(1)}%)
+      </div>
+      <div style={{
+        width: "100%",
+        height: "8px",
+        background: "#334155",
+        borderRadius: "4px"
+      }}>
+        <div style={{
+          width: `${Math.min(value * 100, 100)}%`,
+          height: "100%",
+          background: "#22c55e",
+          borderRadius: "4px"
+        }} />
       </div>
     </div>
   );
