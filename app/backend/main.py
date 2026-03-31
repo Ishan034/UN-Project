@@ -1,9 +1,10 @@
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import json
 from datetime import datetime
+import math
 
 app = FastAPI()
 
@@ -31,6 +32,11 @@ RAIN_FILE = PRED_DIR / "rainfall_heatmap.geojson"
 CONFLICT_FILE = PRED_DIR / "conflict_heatmap.geojson"
 
 # =========================
+# TEMPORAL MEMORY (simple)
+# =========================
+previous_confidence = None
+
+# =========================
 # HELPERS
 # =========================
 def empty_geojson():
@@ -52,10 +58,12 @@ def root():
     return {"status": "ok"}
 
 # =========================
-# PREDICT (REAL METRICS)
+# PREDICT (FINAL)
 # =========================
 @app.get("/predict")
 def predict():
+    global previous_confidence
+
     if not ZONES_FILE.exists():
         return {
             "status": "ok",
@@ -76,22 +84,61 @@ def predict():
     if len(pressures) == 0:
         avg_pressure = 0
         total_pressure = 0
+        max_p = 0
+        std_p = 0
+        top_mean = 0
     else:
         avg_pressure = sum(pressures) / len(pressures)
         total_pressure = sum(pressures)
+        max_p = max(pressures)
+
+        # =========================
+        # Variance
+        # =========================
+        variance = sum((p - avg_pressure) ** 2 for p in pressures) / len(pressures)
+        std_p = math.sqrt(variance)
+
+        # =========================
+        # Top 20% signal
+        # =========================
+        sorted_p = sorted(pressures, reverse=True)
+        k = max(1, int(0.2 * len(sorted_p)))
+        top_k = sorted_p[:k]
+        top_mean = sum(top_k) / len(top_k)
 
     # =========================
-    # METRICS
+    # RAW CONFIDENCE (STRUCTURAL)
     # =========================
-
-    max_pressure = max(pressures) if pressures else 0
-
-    confidence = round(
-        min(0.7 * max_pressure + 0.3 * avg_pressure, 1),
-        3
+    raw_confidence = (
+        0.5 * max_p +
+        0.3 * top_mean +
+        0.2 * (1 / (1 + std_p))
     )
+
+    # =========================
+    # CALIBRATION (CRITICAL)
+    # =========================
+    # Sigmoid-like squashing → makes values meaningful
+    calibrated = 1 / (1 + math.exp(-5 * (raw_confidence - 0.2)))
+
+    # =========================
+    # TEMPORAL SMOOTHING
+    # =========================
+    if previous_confidence is not None:
+        calibrated = 0.7 * calibrated + 0.3 * previous_confidence
+
+    previous_confidence = calibrated
+
+    confidence = round(min(calibrated, 1), 3)
+
+    # =========================
+    # LEAD TIME
+    # =========================
     lead_time = int(7 + avg_pressure * 14)
 
+    # =========================
+    # RISK LEVEL
+    # =========================
     if total_pressure > 50:
         risk = "CRITICAL"
     elif total_pressure > 25:
