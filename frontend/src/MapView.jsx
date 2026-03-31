@@ -224,10 +224,12 @@ export default function MapView() {
             boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
           }}
         >
-          <div><b>Confidence:</b> {confidence}</div>
+          <div><b>Confidence:</b> {(confidence * 100).toFixed(1)}%</div>
+          <div><b>Validation:</b> {(data?.validation_score * 100).toFixed(1)}%</div>
+          <div><b>Drivers:</b> {(data?.driver_score * 100).toFixed(1)}%</div>
           <div><b>Lead time:</b> {leadTime} days</div>
-          <div><b>Risk level:</b> {data?.risk_level}</div>
-          <div><b>Affected index:</b> {data?.affected_score}</div>
+          <div><b>Risk:</b> {data?.risk_level}</div>
+          <div><b>Impact:</b> {data?.affected_score}</div>
         </div>
       )}
 
