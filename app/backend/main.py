@@ -8,11 +8,11 @@ from datetime import datetime
 app = FastAPI()
 
 # =========================
-# 🔓 ENABLE CORS
+# CORS
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Safe for demo / UN prototype
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -28,15 +28,31 @@ ZONES_FILE = PRED_DIR / "migration_zones.geojson"
 HEATMAP_FILE = PRED_DIR / "migration_heatmap.geojson"
 NDVI_FILE = PRED_DIR / "ndvi_heatmap.geojson"
 RAIN_FILE = PRED_DIR / "rainfall_heatmap.geojson"
+CONFLICT_FILE = PRED_DIR / "conflict_heatmap.geojson"
 
+# =========================
+# HELPERS
+# =========================
+def empty_geojson():
+    return {
+        "type": "FeatureCollection",
+        "features": []
+    }
 
+def safe_file_response(file_path):
+    if not file_path.exists():
+        return empty_geojson()
+    return FileResponse(file_path, media_type="application/geo+json")
+
+# =========================
+# ROOT
+# =========================
 @app.get("/")
 def root():
     return {"status": "ok"}
 
-
 # =========================
-# PREDICTION METADATA
+# PREDICT (REAL METRICS)
 # =========================
 @app.get("/predict")
 def predict():
@@ -44,89 +60,67 @@ def predict():
         return {
             "status": "ok",
             "confidence": 0.0,
-            "lead_time_days": 21,
-            "zones": {
-                "type": "FeatureCollection",
-                "features": [],
-            },
+            "lead_time_days": 0,
+            "risk_level": "LOW",
+            "affected_score": 0,
+            "zones": empty_geojson(),
         }
 
     with open(ZONES_FILE) as f:
         zones = json.load(f)
 
+    features = zones.get("features", [])
+
+    pressures = [abs(f["properties"].get("pressure", 0)) for f in features]
+
+    if len(pressures) == 0:
+        avg_pressure = 0
+        total_pressure = 0
+    else:
+        avg_pressure = sum(pressures) / len(pressures)
+        total_pressure = sum(pressures)
+
+    # =========================
+    # METRICS
+    # =========================
+
+    confidence = round(min(avg_pressure, 1), 3)
+    lead_time = int(7 + avg_pressure * 14)
+
+    if total_pressure > 50:
+        risk = "CRITICAL"
+    elif total_pressure > 25:
+        risk = "HIGH"
+    elif total_pressure > 10:
+        risk = "MODERATE"
+    else:
+        risk = "LOW"
+
     return {
         "status": "ok",
-        "confidence": 0.95,
-        "lead_time_days": 21,
+        "confidence": confidence,
+        "lead_time_days": lead_time,
+        "risk_level": risk,
+        "affected_score": round(total_pressure, 2),
         "last_updated": datetime.utcnow().isoformat() + "Z",
         "zones": zones,
     }
 
-
 # =========================
-# 🔥 MIGRATION HEATMAP
+# DATA ENDPOINTS
 # =========================
 @app.get("/heatmap")
 def heatmap():
-    if not HEATMAP_FILE.exists():
-        return JSONResponse(
-            status_code=404,
-            content={"error": "Heatmap not available"},
-        )
+    return safe_file_response(HEATMAP_FILE)
 
-    return FileResponse(
-        HEATMAP_FILE,
-        media_type="application/geo+json",
-        filename="migration_heatmap.geojson",
-    )
-
-
-# =========================
-# 🌱 NDVI LAYER
-# =========================
 @app.get("/ndvi")
 def ndvi():
-    if not NDVI_FILE.exists():
-        return JSONResponse(
-            status_code=404,
-            content={"error": "NDVI not available"},
-        )
+    return safe_file_response(NDVI_FILE)
 
-    return FileResponse(
-        NDVI_FILE,
-        media_type="application/geo+json",
-        filename="ndvi_heatmap.geojson",
-    )
-
-
-# =========================
-# 🌧 RAINFALL LAYER
-# =========================
 @app.get("/rainfall")
 def rainfall():
-    if not RAIN_FILE.exists():
-        return JSONResponse(
-            status_code=404,
-            content={"error": "Rainfall not available"},
-        )
-
-    return FileResponse(
-        RAIN_FILE,
-        media_type="application/geo+json",
-        filename="rainfall_heatmap.geojson",
-    )
-CONFLICT_FILE = PRED_DIR / "conflict_heatmap.geojson"
+    return safe_file_response(RAIN_FILE)
 
 @app.get("/conflict")
 def conflict():
-    if not CONFLICT_FILE.exists():
-        return JSONResponse(
-            status_code=404,
-            content={"error": "Conflict data not available"},
-        )
-
-    return FileResponse(
-        CONFLICT_FILE,
-        media_type="application/geo+json",
-        filename="conflict_heatmap.geojson",
-    )
+    return safe_file_response(CONFLICT_FILE)
