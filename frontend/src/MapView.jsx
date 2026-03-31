@@ -66,17 +66,26 @@ export default function MapView() {
         source: "migration-pressure",
         filter: ["<", ["get", "pressure"], 0],
         paint: {
-          "heatmap-weight": ["abs", ["get", "pressure"]],
-          "heatmap-radius": 40,
-          "heatmap-opacity": 0.8,
-          "heatmap-color": [
+            "heatmap-weight": [
+            "interpolate",
+            ["linear"],
+            ["abs", ["get", "pressure"]],
+            0, 0,
+            0.05, 0.6,
+            0.2, 1
+        ],
+        "heatmap-radius": 50,
+        "heatmap-opacity": 0.9,
+        "heatmap-intensity": 1.2,
+        "heatmap-color": [
             "interpolate",
             ["linear"],
             ["heatmap-density"],
             0, "rgba(0,0,0,0)",
-            0.5, "rgba(255,120,120,0.6)",
-            1, "rgba(180,0,0,0.95)",
-          ],
+            0.3, "rgba(255,120,120,0.7)",
+            0.6, "rgba(255,60,60,0.9)",
+            1, "rgba(180,0,0,1)"
+        ]
         },
       });
 
@@ -86,18 +95,27 @@ export default function MapView() {
         source: "migration-pressure",
         filter: [">", ["get", "pressure"], 0],
         paint: {
-          "heatmap-weight": ["get", "pressure"],
-          "heatmap-radius": 40,
-          "heatmap-opacity": 0.75,
-          "heatmap-color": [
-            "interpolate",
-            ["linear"],
-            ["heatmap-density"],
-            0, "rgba(0,0,0,0)",
-            0.5, "rgba(120,255,120,0.6)",
-            1, "rgba(0,140,0,0.95)",
-          ],
-        },
+  "heatmap-weight": [
+    "interpolate",
+    ["linear"],
+    ["get", "pressure"],
+    0, 0,
+    0.05, 0.6,
+    0.2, 1
+  ],
+  "heatmap-radius": 50,
+  "heatmap-opacity": 0.85,
+  "heatmap-intensity": 1.2,
+  "heatmap-color": [
+    "interpolate",
+    ["linear"],
+    ["heatmap-density"],
+    0, "rgba(0,0,0,0)",
+    0.3, "rgba(120,255,120,0.7)",
+    0.6, "rgba(60,220,60,0.9)",
+    1, "rgba(0,140,0,1)"
+  ]
+},
       });
 
       // =========================

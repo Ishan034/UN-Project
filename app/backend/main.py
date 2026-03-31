@@ -32,8 +32,7 @@ NDVI_FILE = PRED_DIR / "ndvi_heatmap.geojson"
 RAIN_FILE = PRED_DIR / "rainfall_heatmap.geojson"
 CONFLICT_FILE = PRED_DIR / "conflict_heatmap.geojson"
 
-# 🔥 IMPORTANT FIX
-USE_LIVE_INFERENCE = False   # DISABLED to prevent Render crash
+USE_LIVE_INFERENCE = False
 
 # =========================
 # HELPERS
@@ -43,8 +42,6 @@ def load_geojson(file):
         return []
     with open(file) as f:
         data = json.load(f).get("features", [])
-
-    # 🔥 LIMIT SIZE (prevents memory crash)
     return data[:500]
 
 def empty_geojson():
@@ -100,7 +97,7 @@ def find_nearest_value(center, features, key):
     return best_val
 
 # =========================
-# FLOWS (LIMITED FOR MEMORY)
+# FLOWS
 # =========================
 def generate_flows(zones):
     sources = [z for z in zones if z["properties"].get("type") == "source"][:20]
@@ -177,12 +174,16 @@ def predict():
         avg_p = sum(pressures)/len(pressures)
         max_p = max(pressures)
 
-        confidence = round(min(1, avg_p + max_p/2), 3)
-        driver_score = round(normalize(avg_p, 0, 1), 3)
-        validation_score = round((confidence + driver_score)/2, 3)
+        # 🔥 FIXED METRICS (SCALED)
+        scaled_avg = min(1, avg_p * 8)
+        scaled_max = min(1, max_p * 6)
+
+        confidence = round(min(1, 0.6 * scaled_avg + 0.4 * scaled_max), 3)
+        driver_score = round(min(1, 0.5 * scaled_avg + 0.5 * scaled_max), 3)
+        validation_score = round(min(1, 0.5 * confidence + 0.5 * driver_score), 3)
 
         # =========================
-        # TIMELINE (SAFE)
+        # TIMELINE
         # =========================
         timeline = []
         steps = 12
