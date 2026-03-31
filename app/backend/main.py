@@ -30,7 +30,11 @@ NDVI_FILE = PRED_DIR / "ndvi_heatmap.geojson"
 RAIN_FILE = PRED_DIR / "rainfall_heatmap.geojson"
 CONFLICT_FILE = PRED_DIR / "conflict_heatmap.geojson"
 
-previous_confidence = None
+# =========================
+# TEMP MEMORY
+# =========================
+prev_raw_conf = None
+prev_conf = None
 
 # =========================
 # HELPERS
@@ -49,20 +53,58 @@ def safe_file_response(file_path):
         return empty_geojson()
     return FileResponse(file_path, media_type="application/geo+json")
 
-# =========================
-# FEATURE NORMALIZATION
-# =========================
 def normalize(val, min_v, max_v):
     if max_v - min_v == 0:
         return 0
     return (val - min_v) / (max_v - min_v)
 
-# =========================
-# FEATURE AGGREGATION
-# =========================
 def avg_property(features, key):
     vals = [f["properties"].get(key, 0) for f in features]
     return sum(vals)/len(vals) if vals else 0
+
+# =========================
+# VALIDATION COMPONENTS
+# =========================
+
+def compute_alignment(zones, ndvi, rain, conflict):
+    scores = []
+
+    avg_nd = avg_property(ndvi, "ndvi")
+    avg_rn = avg_property(rain, "rain")
+    avg_cf = avg_property(conflict, "weight")
+
+    # Normalize drivers
+    nd_n = 1 - normalize(avg_nd, -0.2, 0.6)
+    rn_n = 1 - normalize(avg_rn, 0, 200)
+    cf_n = normalize(avg_cf, 0, 10)
+
+    expected_driver = 0.4 * cf_n + 0.3 * nd_n + 0.3 * rn_n
+
+    for f in zones:
+        p = abs(f["properties"].get("pressure", 0))
+        scores.append(1 - abs(p - expected_driver))
+
+    return max(0, sum(scores)/len(scores)) if scores else 0
+
+
+def compute_direction(zones):
+    sources = [f for f in zones if f["properties"].get("type") == "source"]
+    dests = [f for f in zones if f["properties"].get("type") == "destination"]
+
+    valid = 0
+    total = 0
+
+    for s in sources:
+        for d in dests:
+            ps = abs(s["properties"].get("pressure", 0))
+            pd = abs(d["properties"].get("pressure", 0))
+
+            if ps > pd:  # source worse than destination
+                valid += 1
+            total += 1
+
+    return valid / total if total > 0 else 0
+
 
 # =========================
 # ROOT
@@ -71,12 +113,13 @@ def avg_property(features, key):
 def root():
     return {"status": "ok"}
 
+
 # =========================
-# PREDICT (PUBLISHABLE)
+# PREDICT (FINAL)
 # =========================
 @app.get("/predict")
 def predict():
-    global previous_confidence
+    global prev_raw_conf, prev_conf
 
     zones = load_geojson(ZONES_FILE)
     ndvi = load_geojson(NDVI_FILE)
@@ -91,7 +134,7 @@ def predict():
         }
 
     # =========================
-    # PRESSURE FEATURES
+    # PRESSURE
     # =========================
     pressures = [abs(f["properties"].get("pressure", 0)) for f in zones]
 
@@ -121,22 +164,21 @@ def predict():
     # =========================
     # TEMPORAL SMOOTHING
     # =========================
-    if previous_confidence is not None:
-        calibrated = 0.7 * calibrated + 0.3 * previous_confidence
+    if prev_conf is not None:
+        calibrated = 0.7 * calibrated + 0.3 * prev_conf
 
-    previous_confidence = calibrated
+    prev_conf = calibrated
     confidence = round(min(calibrated, 1), 3)
 
     # =========================
-    # FEATURE DRIVERS
+    # DRIVER SCORE
     # =========================
     avg_ndvi = avg_property(ndvi, "ndvi")
     avg_rain = avg_property(rain, "rain")
     avg_conflict = avg_property(conflict, "weight")
 
-    # Normalize drivers
-    ndvi_n = 1 - normalize(avg_ndvi, -0.2, 0.6)  # low NDVI = bad
-    rain_n = 1 - normalize(avg_rain, 0, 200)     # low rain = bad
+    ndvi_n = 1 - normalize(avg_ndvi, -0.2, 0.6)
+    rain_n = 1 - normalize(avg_rain, 0, 200)
     conflict_n = normalize(avg_conflict, 0, 10)
 
     driver_score = round(
@@ -147,32 +189,27 @@ def predict():
     )
 
     # =========================
-    # VALIDATION
+    # VALIDATION (REAL)
     # =========================
+    alignment = compute_alignment(zones, ndvi, rain, conflict)
+    direction = compute_direction(zones)
 
-    # Alignment: does pressure match drivers?
-    alignment = min(1, avg_p * (driver_score + 0.1) * 5)
+    if prev_raw_conf is None:
+        stability = 1
+    else:
+        stability = 1 - abs(raw_conf - prev_raw_conf)
 
-    # Directional logic (proxy)
-    sources = [f for f in zones if f["properties"].get("type") == "source"]
-    destinations = [f for f in zones if f["properties"].get("type") == "destination"]
-
-    direction_score = 0
-    if sources and destinations:
-        direction_score = 0.8  # structural validity assumed
-
-    # Stability
-    stability = 1 - abs(confidence - (previous_confidence or confidence))
+    prev_raw_conf = raw_conf
 
     validation_score = round(
         0.4 * alignment +
-        0.4 * direction_score +
+        0.4 * direction +
         0.2 * stability,
         3
     )
 
     # =========================
-    # RISK + SCALE
+    # RISK
     # =========================
     total_pressure = sum(pressures)
 
@@ -202,6 +239,7 @@ def predict():
             "features": zones
         }
     }
+
 
 # =========================
 # DATA ENDPOINTS
