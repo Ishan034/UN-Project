@@ -5,7 +5,6 @@ from pathlib import Path
 import json
 from datetime import datetime
 import math
-import subprocess
 import threading
 import random
 
@@ -33,8 +32,8 @@ NDVI_FILE = PRED_DIR / "ndvi_heatmap.geojson"
 RAIN_FILE = PRED_DIR / "rainfall_heatmap.geojson"
 CONFLICT_FILE = PRED_DIR / "conflict_heatmap.geojson"
 
-USE_LIVE_INFERENCE = True
-inference_running = False
+# 🔥 IMPORTANT FIX
+USE_LIVE_INFERENCE = False   # DISABLED to prevent Render crash
 
 # =========================
 # HELPERS
@@ -43,7 +42,10 @@ def load_geojson(file):
     if not file.exists():
         return []
     with open(file) as f:
-        return json.load(f).get("features", [])
+        data = json.load(f).get("features", [])
+
+    # 🔥 LIMIT SIZE (prevents memory crash)
+    return data[:500]
 
 def empty_geojson():
     return {"type": "FeatureCollection", "features": []}
@@ -98,11 +100,11 @@ def find_nearest_value(center, features, key):
     return best_val
 
 # =========================
-# FLOWS
+# FLOWS (LIMITED FOR MEMORY)
 # =========================
 def generate_flows(zones):
-    sources = [z for z in zones if z["properties"].get("type") == "source"]
-    dests = [z for z in zones if z["properties"].get("type") == "destination"]
+    sources = [z for z in zones if z["properties"].get("type") == "source"][:20]
+    dests = [z for z in zones if z["properties"].get("type") == "destination"][:20]
 
     flows = []
 
@@ -139,109 +141,114 @@ def generate_flows(zones):
     return flows
 
 # =========================
-# ASYNC INFERENCE
-# =========================
-def run_inference_pipeline():
-    global inference_running
-
-    if inference_running:
-        return
-
-    inference_running = True
-
-    def task():
-        global inference_running
-        try:
-            subprocess.run(["python", "app/backend/offline_inference.py"], check=True)
-            subprocess.run(["python", "app/backend/raster_to_geojson.py"], check=True)
-        except Exception as e:
-            print("Inference failed:", e)
-
-        inference_running = False
-
-    threading.Thread(target=task).start()
-
-# =========================
-# ROUTES
+# PREDICT
 # =========================
 @app.get("/predict")
 def predict():
 
-    if USE_LIVE_INFERENCE:
-        run_inference_pipeline()
+    try:
+        zones = load_geojson(ZONES_FILE)
+        ndvi = load_geojson(NDVI_FILE)
+        rain = load_geojson(RAIN_FILE)
+        conflict = load_geojson(CONFLICT_FILE)
 
-    zones = load_geojson(ZONES_FILE)
-    ndvi = load_geojson(NDVI_FILE)
-    rain = load_geojson(RAIN_FILE)
-    conflict = load_geojson(CONFLICT_FILE)
+        if not zones:
+            return {
+                "confidence": 0,
+                "validation_score": 0,
+                "driver_score": 0,
+                "zones": empty_geojson(),
+                "flows": empty_geojson(),
+                "timeline": []
+            }
 
-    if not zones:
-        return {"confidence": 0, "zones": empty_geojson()}
+        # =========================
+        # SPATIAL MAPPING
+        # =========================
+        for f in zones:
+            c = get_centroid(f)
 
-    # attach drivers
-    for f in zones:
-        c = get_centroid(f)
-        f["properties"]["ndvi"] = find_nearest_value(c, ndvi, "ndvi")
-        f["properties"]["rain"] = find_nearest_value(c, rain, "rain")
-        f["properties"]["conflict"] = find_nearest_value(c, conflict, "weight")
+            f["properties"]["ndvi"] = find_nearest_value(c, ndvi, "ndvi")
+            f["properties"]["rain"] = find_nearest_value(c, rain, "rain")
+            f["properties"]["conflict"] = find_nearest_value(c, conflict, "weight")
 
-    pressures = [abs(f["properties"].get("pressure", 0)) for f in zones]
-    avg_p = sum(pressures)/len(pressures)
-    max_p = max(pressures)
+        pressures = [abs(f["properties"].get("pressure", 0)) for f in zones]
 
-    confidence = round(min(1, avg_p + max_p/2), 3)
+        avg_p = sum(pressures)/len(pressures)
+        max_p = max(pressures)
 
-    driver_score = round(normalize(avg_p, 0, 1), 3)
-    validation_score = round((confidence + driver_score)/2, 3)
+        confidence = round(min(1, avg_p + max_p/2), 3)
+        driver_score = round(normalize(avg_p, 0, 1), 3)
+        validation_score = round((confidence + driver_score)/2, 3)
 
-    # =========================
-    # TIMELINE (FINAL)
-    # =========================
-    timeline = []
-    steps = 12
-    uncertainty = max(0.05, 0.3 * (1 - confidence))
+        # =========================
+        # TIMELINE (SAFE)
+        # =========================
+        timeline = []
+        steps = 12
+        uncertainty = max(0.05, 0.3 * (1 - confidence))
 
-    for i in range(steps):
-        t = i / steps
+        for i in range(steps):
+            t = i / steps
 
-        growth = math.exp(-((t - 0.4) ** 2) / 0.02)
-        decay = math.exp(-2 * t)
+            growth = math.exp(-((t - 0.4) ** 2) / 0.02)
+            decay = math.exp(-2 * t)
 
-        base = (0.6 * growth + 0.4 * decay)
-        signal = (0.7 * avg_p + 0.3 * max_p)
+            base = (0.6 * growth + 0.4 * decay)
+            signal = (0.7 * avg_p + 0.3 * max_p)
 
-        mean_val = base * signal
+            mean_val = base * signal
 
-        timeline.append({
-            "step": f"T{i}",
-            "mean": round(mean_val, 3),
-            "lower": round(mean_val - uncertainty, 3),
-            "upper": round(mean_val + uncertainty, 3),
-            "optimistic": round(mean_val * 0.7, 3),
-            "pessimistic": round(mean_val * 1.3, 3),
-        })
+            timeline.append({
+                "step": f"T{i}",
+                "mean": round(mean_val, 3),
+                "lower": round(mean_val - uncertainty, 3),
+                "upper": round(mean_val + uncertainty, 3),
+                "optimistic": round(mean_val * 0.7, 3),
+                "pessimistic": round(mean_val * 1.3, 3),
+            })
 
-    flows = generate_flows(zones)
+        flows = generate_flows(zones)
 
-    return {
-        "status": "ok",
-        "confidence": confidence,
-        "validation_score": validation_score,
-        "driver_score": driver_score,
-        "lead_time_days": int(7 + avg_p * 14),
-        "risk_level": "HIGH" if avg_p > 0.3 else "LOW",
-        "affected_score": round(sum(pressures), 2),
-        "timeline": timeline,
-        "flows": {
-            "type": "FeatureCollection",
-            "features": flows
-        },
-        "zones": {
-            "type": "FeatureCollection",
-            "features": zones
+        return {
+            "status": "ok",
+            "confidence": confidence,
+            "validation_score": validation_score,
+            "driver_score": driver_score,
+            "lead_time_days": int(7 + avg_p * 14),
+            "risk_level": "HIGH" if avg_p > 0.3 else "LOW",
+            "affected_score": round(sum(pressures), 2),
+            "last_updated": datetime.utcnow().isoformat() + "Z",
+            "timeline": timeline,
+            "flows": {
+                "type": "FeatureCollection",
+                "features": flows
+            },
+            "zones": {
+                "type": "FeatureCollection",
+                "features": zones
+            }
         }
-    }
 
+    except Exception as e:
+        print("❌ Predict failed:", e)
+
+        return {
+            "status": "error",
+            "confidence": 0,
+            "validation_score": 0,
+            "driver_score": 0,
+            "lead_time_days": 0,
+            "risk_level": "UNKNOWN",
+            "affected_score": 0,
+            "timeline": [],
+            "flows": {"type": "FeatureCollection", "features": []},
+            "zones": {"type": "FeatureCollection", "features": []}
+        }
+
+# =========================
+# DATA ENDPOINTS
+# =========================
 @app.get("/ndvi")
 def ndvi():
     return safe_file_response(NDVI_FILE)
