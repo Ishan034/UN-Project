@@ -84,7 +84,12 @@ def predict():
     # METRICS
     # =========================
 
-    confidence = round(min(avg_pressure, 1), 3)
+    max_pressure = max(pressures) if pressures else 0
+
+    confidence = round(
+        min(0.7 * max_pressure + 0.3 * avg_pressure, 1),
+        3
+    )
     lead_time = int(7 + avg_pressure * 14)
 
     if total_pressure > 50:
