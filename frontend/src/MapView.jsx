@@ -10,7 +10,7 @@ export default function MapView() {
 
   const [confidence, setConfidence] = useState(null);
   const [leadTime, setLeadTime] = useState(null);
-  const [data, setData] = useState(null); // ✅ NEW
+  const [data, setData] = useState(null);
 
   const [showSource, setShowSource] = useState(true);
   const [showDestination, setShowDestination] = useState(true);
@@ -20,31 +20,24 @@ export default function MapView() {
   const [showConflict, setShowConflict] = useState(false);
 
   // =========================
-  // Fetch prediction metadata (SAFE)
+  // Fetch prediction
   // =========================
-
   useEffect(() => {
     fetch("https://un-project-4ajo.onrender.com/predict")
       .then((res) => res.json())
       .then((data) => {
-        if (!data || !data.zones) {
-          console.warn("Invalid predict response", data);
-          return;
-        }
+        if (!data || !data.zones) return;
 
         setConfidence(data.confidence ?? 0);
         setLeadTime(data.lead_time_days ?? 0);
-        setData(data); // ✅ IMPORTANT
+        setData(data);
       })
-      .catch((err) => {
-        console.error("Predict fetch failed:", err);
-      });
+      .catch(console.error);
   }, []);
 
   // =========================
-  // Map initialization
+  // Map init
   // =========================
-
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return;
 
@@ -57,11 +50,11 @@ export default function MapView() {
 
     map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
-    map.on("error", (e) => {
-      console.error("Mapbox error:", e);
-    });
-
     map.on("load", () => {
+
+      // =========================
+      // EXISTING HEATMAPS (UNCHANGED)
+      // =========================
       map.addSource("migration-pressure", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/heatmap",
@@ -107,6 +100,9 @@ export default function MapView() {
         },
       });
 
+      // =========================
+      // NDVI / RAIN / CONFLICT (UNCHANGED)
+      // =========================
       map.addSource("ndvi-layer", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/ndvi",
@@ -179,16 +175,89 @@ export default function MapView() {
         layout: { visibility: "none" },
       });
 
-      // (flows code unchanged — left exactly as-is)
-
       mapRef.current = map;
     });
   }, []);
 
   // =========================
-  // Toggle logic
+  // 🔥 FLOW LAYER ADDITION (SAFE)
   // =========================
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !data?.flows) return;
 
+    if (!map.getSource("flows")) {
+      map.addSource("flows", {
+        type: "geojson",
+        data: data.flows
+      });
+
+      // Glow
+      map.addLayer({
+        id: "migration-flow-glow",
+        type: "line",
+        source: "flows",
+        paint: {
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["get", "strength"],
+            0, 6,
+            1, 14
+          ],
+          "line-color": "#60a5fa",
+          "line-opacity": 0.15,
+          "line-blur": 6
+        }
+      });
+
+      // Main lines
+      map.addLayer({
+        id: "migration-flow-lines",
+        type: "line",
+        source: "flows",
+        paint: {
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["get", "strength"],
+            0, 1,
+            1, 5
+          ],
+          "line-color": [
+            "interpolate",
+            ["linear"],
+            ["get", "strength"],
+            0, "#3b82f6",
+            1, "#ef4444"
+          ],
+          "line-opacity": 0.9
+        }
+      });
+
+      // Arrows
+      map.addLayer({
+        id: "migration-flow-arrows",
+        type: "symbol",
+        source: "flows",
+        layout: {
+          "symbol-placement": "line",
+          "symbol-spacing": 50,
+          "icon-image": "triangle-15",
+          "icon-size": 0.7,
+          "icon-allow-overlap": true
+        }
+      });
+
+    } else {
+      map.getSource("flows").setData(data.flows);
+    }
+
+  }, [data]);
+
+  // =========================
+  // TOGGLES (UNCHANGED)
+  // =========================
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -206,6 +275,7 @@ export default function MapView() {
     toggle("ndvi-heat", showNDVI);
     toggle("rain-heat", showRain);
     toggle("conflict-heat", showConflict);
+
   }, [showSource, showDestination, showFlows, showNDVI, showRain, showConflict]);
 
   return (
@@ -213,17 +283,14 @@ export default function MapView() {
       <div ref={mapContainerRef} style={{ position: "absolute", inset: 0 }} />
 
       {confidence !== null && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 20,
-            left: 20,
-            background: "white",
-            padding: "12px",
-            borderRadius: "6px",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
-          }}
-        >
+        <div style={{
+          position: "absolute",
+          bottom: 20,
+          left: 20,
+          background: "white",
+          padding: "12px",
+          borderRadius: "6px"
+        }}>
           <div><b>Confidence:</b> {(confidence * 100).toFixed(1)}%</div>
           <div><b>Validation:</b> {(data?.validation_score * 100).toFixed(1)}%</div>
           <div><b>Drivers:</b> {(data?.driver_score * 100).toFixed(1)}%</div>
@@ -233,17 +300,14 @@ export default function MapView() {
         </div>
       )}
 
-      <div
-        style={{
-          position: "absolute",
-          top: 20,
-          right: 20,
-          background: "white",
-          padding: "12px",
-          borderRadius: "6px",
-          boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
-        }}
-      >
+      <div style={{
+        position: "absolute",
+        top: 20,
+        right: 20,
+        background: "white",
+        padding: "12px",
+        borderRadius: "6px"
+      }}>
         <label><input type="checkbox" checked={showSource} onChange={() => setShowSource(!showSource)} /> 🔴 Source</label><br/>
         <label><input type="checkbox" checked={showDestination} onChange={() => setShowDestination(!showDestination)} /> 🟢 Destination</label><br/>
         <label><input type="checkbox" checked={showFlows} onChange={() => setShowFlows(!showFlows)} /> 🟠 Migration Corridor</label><br/>

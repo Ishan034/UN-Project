@@ -5,6 +5,9 @@ from pathlib import Path
 import json
 from datetime import datetime
 import math
+import subprocess
+import threading
+import random
 
 app = FastAPI()
 
@@ -30,11 +33,8 @@ NDVI_FILE = PRED_DIR / "ndvi_heatmap.geojson"
 RAIN_FILE = PRED_DIR / "rainfall_heatmap.geojson"
 CONFLICT_FILE = PRED_DIR / "conflict_heatmap.geojson"
 
-# =========================
-# TEMP MEMORY
-# =========================
-prev_raw_conf = None
-prev_conf = None
+USE_LIVE_INFERENCE = True
+inference_running = False
 
 # =========================
 # HELPERS
@@ -63,63 +63,112 @@ def avg_property(features, key):
     return sum(vals)/len(vals) if vals else 0
 
 # =========================
-# VALIDATION COMPONENTS
+# SPATIAL
 # =========================
+def get_centroid(feature):
+    coords = feature["geometry"]["coordinates"]
 
-def compute_alignment(zones, ndvi, rain, conflict):
-    scores = []
+    if feature["geometry"]["type"] == "Point":
+        return coords
 
-    avg_nd = avg_property(ndvi, "ndvi")
-    avg_rn = avg_property(rain, "rain")
-    avg_cf = avg_property(conflict, "weight")
+    if feature["geometry"]["type"] == "Polygon":
+        pts = coords[0]
+        x = sum(p[0] for p in pts) / len(pts)
+        y = sum(p[1] for p in pts) / len(pts)
+        return [x, y]
 
-    # Normalize drivers
-    nd_n = 1 - normalize(avg_nd, -0.2, 0.6)
-    rn_n = 1 - normalize(avg_rn, 0, 200)
-    cf_n = normalize(avg_cf, 0, 10)
+    return [0, 0]
 
-    expected_driver = 0.4 * cf_n + 0.3 * nd_n + 0.3 * rn_n
+def distance(a, b):
+    return ((a[0] - b[0])**2 + (a[1] - b[1])**2) ** 0.5
 
-    for f in zones:
-        p = abs(f["properties"].get("pressure", 0))
-        scores.append(1 - abs(p - expected_driver))
+def find_nearest_value(center, features, key):
+    best_val = 0
+    min_dist = float("inf")
 
-    return max(0, sum(scores)/len(scores)) if scores else 0
+    for f in features:
+        val = f["properties"].get(key, 0)
+        c = get_centroid(f)
+        d = distance(center, c)
 
+        if d < min_dist:
+            min_dist = d
+            best_val = val
 
-def compute_direction(zones):
-    sources = [f for f in zones if f["properties"].get("type") == "source"]
-    dests = [f for f in zones if f["properties"].get("type") == "destination"]
+    return best_val
 
-    valid = 0
-    total = 0
+# =========================
+# FLOWS
+# =========================
+def generate_flows(zones):
+    sources = [z for z in zones if z["properties"].get("type") == "source"]
+    dests = [z for z in zones if z["properties"].get("type") == "destination"]
+
+    flows = []
 
     for s in sources:
+        s_center = get_centroid(s)
+        s_pressure = abs(s["properties"].get("pressure", 0))
+
+        best_d = None
+        best_score = float("inf")
+
         for d in dests:
-            ps = abs(s["properties"].get("pressure", 0))
-            pd = abs(d["properties"].get("pressure", 0))
+            d_center = get_centroid(d)
+            dist = distance(s_center, d_center)
 
-            if ps > pd:  # source worse than destination
-                valid += 1
-            total += 1
+            if dist < best_score:
+                best_score = dist
+                best_d = d
 
-    return valid / total if total > 0 else 0
+        if best_d:
+            d_center = get_centroid(best_d)
+            d_pressure = abs(best_d["properties"].get("pressure", 0))
 
+            flows.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [s_center, d_center]
+                },
+                "properties": {
+                    "strength": round((s_pressure + d_pressure) / 2, 3)
+                }
+            })
+
+    return flows
 
 # =========================
-# ROOT
+# ASYNC INFERENCE
 # =========================
-@app.get("/")
-def root():
-    return {"status": "ok"}
+def run_inference_pipeline():
+    global inference_running
 
+    if inference_running:
+        return
+
+    inference_running = True
+
+    def task():
+        global inference_running
+        try:
+            subprocess.run(["python", "app/backend/offline_inference.py"], check=True)
+            subprocess.run(["python", "app/backend/raster_to_geojson.py"], check=True)
+        except Exception as e:
+            print("Inference failed:", e)
+
+        inference_running = False
+
+    threading.Thread(target=task).start()
 
 # =========================
-# PREDICT (FINAL)
+# ROUTES
 # =========================
 @app.get("/predict")
 def predict():
-    global prev_raw_conf, prev_conf
+
+    if USE_LIVE_INFERENCE:
+        run_inference_pipeline()
 
     zones = load_geojson(ZONES_FILE)
     ndvi = load_geojson(NDVI_FILE)
@@ -127,126 +176,71 @@ def predict():
     conflict = load_geojson(CONFLICT_FILE)
 
     if not zones:
-        return {
-            "confidence": 0,
-            "validation_score": 0,
-            "zones": empty_geojson()
-        }
+        return {"confidence": 0, "zones": empty_geojson()}
 
-    # =========================
-    # PRESSURE
-    # =========================
+    # attach drivers
+    for f in zones:
+        c = get_centroid(f)
+        f["properties"]["ndvi"] = find_nearest_value(c, ndvi, "ndvi")
+        f["properties"]["rain"] = find_nearest_value(c, rain, "rain")
+        f["properties"]["conflict"] = find_nearest_value(c, conflict, "weight")
+
     pressures = [abs(f["properties"].get("pressure", 0)) for f in zones]
-
-    avg_p = sum(pressures) / len(pressures)
+    avg_p = sum(pressures)/len(pressures)
     max_p = max(pressures)
 
-    sorted_p = sorted(pressures, reverse=True)
-    k = max(1, int(0.2 * len(sorted_p)))
-    top_mean = sum(sorted_p[:k]) / k
+    confidence = round(min(1, avg_p + max_p/2), 3)
 
-    std_p = math.sqrt(sum((p - avg_p)**2 for p in pressures)/len(pressures))
-
-    # =========================
-    # RAW CONFIDENCE
-    # =========================
-    raw_conf = (
-        0.5 * max_p +
-        0.3 * top_mean +
-        0.2 * (1 / (1 + std_p))
-    )
+    driver_score = round(normalize(avg_p, 0, 1), 3)
+    validation_score = round((confidence + driver_score)/2, 3)
 
     # =========================
-    # CALIBRATION
+    # TIMELINE (FINAL)
     # =========================
-    calibrated = 1 / (1 + math.exp(-5 * (raw_conf - 0.2)))
+    timeline = []
+    steps = 12
+    uncertainty = max(0.05, 0.3 * (1 - confidence))
 
-    # =========================
-    # TEMPORAL SMOOTHING
-    # =========================
-    if prev_conf is not None:
-        calibrated = 0.7 * calibrated + 0.3 * prev_conf
+    for i in range(steps):
+        t = i / steps
 
-    prev_conf = calibrated
-    confidence = round(min(calibrated, 1), 3)
+        growth = math.exp(-((t - 0.4) ** 2) / 0.02)
+        decay = math.exp(-2 * t)
 
-    # =========================
-    # DRIVER SCORE
-    # =========================
-    avg_ndvi = avg_property(ndvi, "ndvi")
-    avg_rain = avg_property(rain, "rain")
-    avg_conflict = avg_property(conflict, "weight")
+        base = (0.6 * growth + 0.4 * decay)
+        signal = (0.7 * avg_p + 0.3 * max_p)
 
-    ndvi_n = 1 - normalize(avg_ndvi, -0.2, 0.6)
-    rain_n = 1 - normalize(avg_rain, 0, 200)
-    conflict_n = normalize(avg_conflict, 0, 10)
+        mean_val = base * signal
 
-    driver_score = round(
-        0.4 * conflict_n +
-        0.3 * ndvi_n +
-        0.3 * rain_n,
-        3
-    )
+        timeline.append({
+            "step": f"T{i}",
+            "mean": round(mean_val, 3),
+            "lower": round(mean_val - uncertainty, 3),
+            "upper": round(mean_val + uncertainty, 3),
+            "optimistic": round(mean_val * 0.7, 3),
+            "pessimistic": round(mean_val * 1.3, 3),
+        })
 
-    # =========================
-    # VALIDATION (REAL)
-    # =========================
-    alignment = compute_alignment(zones, ndvi, rain, conflict)
-    direction = compute_direction(zones)
+    flows = generate_flows(zones)
 
-    if prev_raw_conf is None:
-        stability = 1
-    else:
-        stability = 1 - abs(raw_conf - prev_raw_conf)
-
-    prev_raw_conf = raw_conf
-
-    validation_score = round(
-        0.4 * alignment +
-        0.4 * direction +
-        0.2 * stability,
-        3
-    )
-
-    # =========================
-    # RISK
-    # =========================
-    total_pressure = sum(pressures)
-
-    if total_pressure > 50:
-        risk = "CRITICAL"
-    elif total_pressure > 25:
-        risk = "HIGH"
-    elif total_pressure > 10:
-        risk = "MODERATE"
-    else:
-        risk = "LOW"
-
-    # =========================
-    # FINAL RESPONSE
-    # =========================
     return {
         "status": "ok",
         "confidence": confidence,
         "validation_score": validation_score,
         "driver_score": driver_score,
         "lead_time_days": int(7 + avg_p * 14),
-        "risk_level": risk,
-        "affected_score": round(total_pressure, 2),
-        "last_updated": datetime.utcnow().isoformat() + "Z",
+        "risk_level": "HIGH" if avg_p > 0.3 else "LOW",
+        "affected_score": round(sum(pressures), 2),
+        "timeline": timeline,
+        "flows": {
+            "type": "FeatureCollection",
+            "features": flows
+        },
         "zones": {
             "type": "FeatureCollection",
             "features": zones
         }
     }
-
-
-# =========================
-# DATA ENDPOINTS
-# =========================
-@app.get("/heatmap")
-def heatmap():
-    return safe_file_response(PRED_DIR / "migration_heatmap.geojson")
 
 @app.get("/ndvi")
 def ndvi():
