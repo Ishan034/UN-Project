@@ -183,13 +183,13 @@ def predict():
         avg_p = sum(pressures)/len(pressures)
         max_p = max(pressures)
 
-        # 🔥 FIXED METRICS (SCALED)
-        scaled_avg = min(1, avg_p * 8)
-        scaled_max = min(1, max_p * 6)
+        # 🔥 FINAL METRIC FIX (AGGRESSIVE BUT STABLE)
+        scaled_avg = min(1, avg_p * 20)
+        scaled_max = min(1, max_p * 15)
 
-        confidence = round(min(1, 0.7 * avg_p + 0.3 * max_p), 3)
-        driver_score = round(min(1, avg_p), 3)
-        validation_score = round(min(1, (confidence + driver_score) / 2), 3)
+        confidence = round(0.6 * scaled_avg + 0.4 * scaled_max, 3)
+        driver_score = round(0.5 * scaled_avg + 0.5 * scaled_max, 3)
+        validation_score = round((confidence + driver_score) / 2, 3)
 
         # =========================
         # TIMELINE
@@ -270,3 +270,41 @@ def rainfall():
 @app.get("/conflict")
 def conflict():
     return safe_file_response(CONFLICT_FILE)
+
+# =========================
+# HEATMAP ENDPOINT (CRITICAL FIX)
+# =========================
+@app.get("/heatmap")
+def heatmap():
+    try:
+        zones = load_geojson(ZONES_FILE)
+
+        features = []
+
+        for f in zones:
+            pressure = f["properties"].get("pressure", 0)
+
+            # 🔥 STRONG SCALING (FINAL FIX)
+            pressure = pressure * 50
+
+            coords = get_centroid(f)
+
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": coords
+                },
+                "properties": {
+                    "pressure": pressure
+                }
+            })
+
+        return {
+            "type": "FeatureCollection",
+            "features": features
+        }
+
+    except Exception as e:
+        print("Heatmap error:", e)
+        return {"type": "FeatureCollection", "features": []}
