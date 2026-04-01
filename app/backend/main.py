@@ -169,7 +169,16 @@ def predict():
             f["properties"]["rain"] = find_nearest_value(c, rain, "rain")
             f["properties"]["conflict"] = find_nearest_value(c, conflict, "weight")
 
-        pressures = [abs(f["properties"].get("pressure", 0)) for f in zones]
+        pressures = []
+
+        for f in zones:
+            p = abs(f["properties"].get("pressure", 0))
+
+            # 🔥 FORCE AMPLIFICATION (TEMP FIX)
+            p = p * 20  # <-- key fix
+
+            f["properties"]["pressure"] = p
+            pressures.append(p)
 
         avg_p = sum(pressures)/len(pressures)
         max_p = max(pressures)
@@ -178,9 +187,9 @@ def predict():
         scaled_avg = min(1, avg_p * 8)
         scaled_max = min(1, max_p * 6)
 
-        confidence = round(min(1, 0.6 * scaled_avg + 0.4 * scaled_max), 3)
-        driver_score = round(min(1, 0.5 * scaled_avg + 0.5 * scaled_max), 3)
-        validation_score = round(min(1, 0.5 * confidence + 0.5 * driver_score), 3)
+        confidence = round(min(1, 0.7 * avg_p + 0.3 * max_p), 3)
+        driver_score = round(min(1, avg_p), 3)
+        validation_score = round(min(1, (confidence + driver_score) / 2), 3)
 
         # =========================
         # TIMELINE
