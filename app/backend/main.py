@@ -180,16 +180,39 @@ def predict():
             f["properties"]["pressure"] = p
             pressures.append(p)
 
-        avg_p = sum(pressures)/len(pressures)
-        max_p = max(pressures)
+        # =========================
+        # FINAL METRIC CALIBRATION (PROPER)
+        # =========================
 
-        # 🔥 FINAL METRIC FIX (AGGRESSIVE BUT STABLE)
-        scaled_avg = min(1, avg_p * 20)
-        scaled_max = min(1, max_p * 15)
+        # normalize pressure distribution
+        if len(pressures) > 1:
+            min_p = min(pressures)
+            max_p = max(pressures)
+        else:
+            min_p, max_p = 0, 1
 
-        confidence = round(0.6 * scaled_avg + 0.4 * scaled_max, 3)
-        driver_score = round(0.5 * scaled_avg + 0.5 * scaled_max, 3)
-        validation_score = round((confidence + driver_score) / 2, 3)
+        def norm(p):
+            if max_p - min_p == 0:
+                return 0
+            return (p - min_p) / (max_p - min_p)
+
+        normalized = [norm(p) for p in pressures]
+
+        avg_n = sum(normalized) / len(normalized)
+        max_n = max(normalized)
+
+        # variance = signal strength
+        variance = sum((p - avg_n) ** 2 for p in normalized) / len(normalized)
+
+        # =========================
+        # FINAL METRICS
+        # =========================
+
+        confidence = round(min(1, 0.5 * max_n + 0.3 * avg_n + 0.2 * variance), 3)
+
+        driver_score = round(min(1, 0.6 * avg_n + 0.4 * variance), 3)
+
+        validation_score = round(min(1, 0.5 * confidence + 0.5 * driver_score), 3)
 
         # =========================
         # TIMELINE
