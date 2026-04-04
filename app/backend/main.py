@@ -137,6 +137,9 @@ def generate_flows(zones):
 
     return flows
 
+# =========================
+# VISUAL VALIDATION (FIXED)
+# =========================
 def compute_visual_validation(zones):
     if not zones:
         return 0
@@ -144,11 +147,19 @@ def compute_visual_validation(zones):
     total = 0
 
     for f in zones:
+        p = f["properties"].get("pressure", 0)
         ndvi = f["properties"].get("ndvi", 0)
         rain = f["properties"].get("rain", 0)
 
-        ndvi_score = 1 - min(1, abs(ndvi) / 0.3)
-        rain_score = min(1, rain / 100)
+        ndvi_norm = max(0, min(1, ndvi))
+        rain_norm = max(0, min(1, (rain - 20) / 80))
+
+        if p < 0:
+            ndvi_score = 1 - max(0, ndvi_norm)
+            rain_score = 1 - rain_norm
+        else:
+            ndvi_score = max(0, ndvi_norm)
+            rain_score = rain_norm
 
         total += (ndvi_score + rain_score) / 2
 
@@ -200,16 +211,19 @@ def predict():
             f["properties"]["conflict"] = conflict_val
 
             # =========================
-            # 🔥 FIXED: LOCAL VALIDATION SCORE (CONTINUOUS)
+            # 🔥 FINAL LOCAL VALIDATION (DIRECTIONAL + CONTRAST)
             # =========================
 
-            # NDVI contribution (assumes delta range roughly -0.3 to 0.3)
-            ndvi_score = 1 - min(1, abs(ndvi_val) / 0.3)
+            ndvi_norm = max(0, min(1, ndvi_val))
+            rain_norm = max(0, min(1, (rain_val - 20) / 80))
 
-            # Rainfall contribution (normalize around 100 mm)
-            rain_score = min(1, rain_val / 100)
+            if pressure < 0:
+                ndvi_score = 1 - max(0, ndvi_norm)
+                rain_score = 1 - rain_norm
+            else:
+                ndvi_score = max(0, ndvi_norm)
+                rain_score = rain_norm
 
-            # Combine
             validation_local = (ndvi_score + rain_score) / 2
 
             f["properties"]["validation_score_local"] = round(validation_local, 3)
