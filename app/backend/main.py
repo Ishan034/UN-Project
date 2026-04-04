@@ -144,26 +144,22 @@ def compute_visual_validation(zones):
     if not zones:
         return 0
 
-    total = 0
+    scores = []
 
     for f in zones:
-        p = f["properties"].get("pressure", 0)
-        ndvi = f["properties"].get("ndvi", 0)
-        rain = f["properties"].get("rain", 0)
+        val = f["properties"].get("validation_score_local", None)
+        if val is not None:
+            scores.append(val)
 
-        ndvi_norm = max(0, min(1, ndvi))
-        rain_norm = max(0, min(1, (rain - 20) / 80))
+    if not scores:
+        return 0
 
-        if p < 0:
-            ndvi_score = 1 - max(0, ndvi_norm)
-            rain_score = 1 - rain_norm
-        else:
-            ndvi_score = max(0, ndvi_norm)
-            rain_score = rain_norm
+    avg_score = sum(scores) / len(scores)
 
-        total += (ndvi_score + rain_score) / 2
+    # 🔥 RESCALE FOR REALISTIC OUTPUT
+    adjusted = (avg_score - 0.3) / 0.7
 
-    return round(total / len(zones), 3)
+    return round(max(0, min(1, adjusted)), 3)
 
 # =========================
 # PREDICT
@@ -214,7 +210,7 @@ def predict():
             # 🔥 FINAL LOCAL VALIDATION (DIRECTIONAL + CONTRAST)
             # =========================
 
-            ndvi_norm = max(0, min(1, ndvi_val))
+            ndvi_norm = max(-1, min(1, ndvi_val / 0.1))
             rain_norm = max(0, min(1, (rain_val - 20) / 80))
 
             if pressure < 0:
