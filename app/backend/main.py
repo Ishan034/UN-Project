@@ -137,6 +137,39 @@ def generate_flows(zones):
 
     return flows
 
+def compute_visual_validation(zones):
+    score = 0
+    total = len(zones)
+
+    if total == 0:
+        return 0
+
+    for f in zones:
+        p = f["properties"].get("pressure", 0)
+        ndvi = f["properties"].get("ndvi", 0)
+        rain = f["properties"].get("rain", 0)
+
+        match = 0
+
+        # 🔴 Out-migration expected
+        if p < 0:
+            if ndvi < 0:   # vegetation loss
+                match += 1
+            if rain < 50:  # low rainfall threshold
+                match += 1
+
+        # 🟢 In-migration expected
+        else:
+            if ndvi >= 0:
+                match += 1
+            if rain >= 50:
+                match += 1
+
+        # each region contributes max 2
+        score += match / 2
+
+    return round(score / total, 3)
+
 # =========================
 # PREDICT
 # =========================
@@ -167,15 +200,35 @@ def predict():
 
             pressure = f["properties"].get("pressure", 0)
 
-            # ✅ ADD THIS (CRITICAL FIX)
+            # type
             if pressure < 0:
                 f["properties"]["type"] = "source"
             else:
                 f["properties"]["type"] = "destination"
 
-            f["properties"]["ndvi"] = find_nearest_value(c, ndvi, "ndvi")
-            f["properties"]["rain"] = find_nearest_value(c, rain, "rain")
-            f["properties"]["conflict"] = find_nearest_value(c, conflict, "weight")
+            # drivers
+            ndvi_val = find_nearest_value(c, ndvi, "ndvi")
+            rain_val = find_nearest_value(c, rain, "rain")
+            conflict_val = find_nearest_value(c, conflict, "weight")
+
+            f["properties"]["ndvi"] = ndvi_val
+            f["properties"]["rain"] = rain_val
+            f["properties"]["conflict"] = conflict_val
+
+            # =========================
+            # 🔥 NEW: LOCAL VALIDATION SCORE
+            # =========================
+            score = 0
+
+            # NDVI agreement
+            if (pressure < 0 and ndvi_val < 0) or (pressure >= 0 and ndvi_val >= 0):
+                score += 1
+
+            # Rainfall agreement
+            if (pressure < 0 and rain_val < 50) or (pressure >= 0 and rain_val >= 50):
+                score += 1
+
+            f["properties"]["validation_score_local"] = round(score / 2, 3)
 
         pressures = []
 
@@ -251,11 +304,13 @@ def predict():
             })
 
         flows = generate_flows(zones)
+        visual_validation = compute_visual_validation(zones)
 
         return {
             "status": "ok",
             "confidence": confidence,
             "validation_score": validation_score,
+            "visual_validation": visual_validation,
             "driver_score": driver_score,
             "lead_time_days": int(7 + avg_p * 14),
             "risk_level": risk,

@@ -18,6 +18,7 @@ export default function MapView() {
   const [showNDVI, setShowNDVI] = useState(false);
   const [showRain, setShowRain] = useState(false);
   const [showConflict, setShowConflict] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
 
   // =========================
   // Fetch prediction
@@ -58,6 +59,14 @@ export default function MapView() {
       map.addSource("migration-pressure", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/heatmap",
+      });
+
+      map.addSource("validation-layer", {
+        type: "geojson",
+        data: {
+            type: "FeatureCollection",
+            features: []
+        }
       });
 
       map.addLayer({
@@ -167,6 +176,27 @@ export default function MapView() {
         },
       });
 
+      map.addLayer({
+  id: "validation-layer-circles",
+  type: "circle",
+  source: "validation-layer",
+  paint: {
+    "circle-radius": 5,
+    "circle-opacity": 0.85,
+    "circle-color": [
+      "interpolate",
+      ["linear"],
+      ["get", "validation_score_local"],
+      0, "#ef4444",    // red (bad)
+      0.5, "#facc15",  // yellow
+      1, "#22c55e"     // green (good)
+    ]
+  },
+  layout: {
+    visibility: "none"
+  }
+});
+
       map.addSource("conflict-layer", {
         type: "geojson",
         data: "https://un-project-4ajo.onrender.com/conflict",
@@ -270,6 +300,9 @@ export default function MapView() {
     } else {
       map.getSource("flows").setData(data.flows);
     }
+    if (map.getSource("validation-layer") && data?.zones) {
+        map.getSource("validation-layer").setData(data.zones);
+    }
 
   }, [data]);
 
@@ -293,8 +326,9 @@ export default function MapView() {
     toggle("ndvi-heat", showNDVI);
     toggle("rain-heat", showRain);
     toggle("conflict-heat", showConflict);
+    toggle("validation-layer-circles", showValidation);
 
-  }, [showSource, showDestination, showFlows, showNDVI, showRain, showConflict]);
+  }, [showSource, showDestination, showFlows, showNDVI, showRain, showConflict, showValidation]);
 
   return (
     <>
@@ -311,6 +345,7 @@ export default function MapView() {
         }}>
           <div><b>Confidence:</b> {(confidence * 100).toFixed(1)}%</div>
           <div><b>Validation:</b> {(data?.validation_score * 100).toFixed(1)}%</div>
+          <div><b>Visual Validation:</b> {((data?.visual_validation ?? 0) * 100).toFixed(1)}%</div>
           <div><b>Drivers:</b> {(data?.driver_score * 100).toFixed(1)}%</div>
           <div><b>Lead time:</b> {leadTime} days</div>
           <div><b>Risk:</b> {data?.risk_level}</div>
@@ -331,7 +366,8 @@ export default function MapView() {
         <label><input type="checkbox" checked={showFlows} onChange={() => setShowFlows(!showFlows)} /> 🟠 Migration Corridor</label><br/>
         <label><input type="checkbox" checked={showNDVI} onChange={() => setShowNDVI(!showNDVI)} /> 🌱 NDVI</label><br/>
         <label><input type="checkbox" checked={showRain} onChange={() => setShowRain(!showRain)} /> 🌧 Rainfall</label><br/>
-        <label><input type="checkbox" checked={showConflict} onChange={() => setShowConflict(!showConflict)} /> ⚔ Conflict</label>
+        <label><input type="checkbox" checked={showConflict} onChange={() => setShowConflict(!showConflict)} /> ⚔ Conflict</label><br/>
+        <label><input type="checkbox" checked={showValidation} onChange={() => setShowValidation(!showValidation)} /> 🧪 Validation Layer</label>
       </div>
     </>
   );
