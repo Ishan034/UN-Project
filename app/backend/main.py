@@ -138,37 +138,21 @@ def generate_flows(zones):
     return flows
 
 def compute_visual_validation(zones):
-    score = 0
-    total = len(zones)
-
-    if total == 0:
+    if not zones:
         return 0
 
+    total = 0
+
     for f in zones:
-        p = f["properties"].get("pressure", 0)
         ndvi = f["properties"].get("ndvi", 0)
         rain = f["properties"].get("rain", 0)
 
-        match = 0
+        ndvi_score = 1 - min(1, abs(ndvi) / 0.3)
+        rain_score = min(1, rain / 100)
 
-        # 🔴 Out-migration expected
-        if p < 0:
-            if ndvi < 0:   # vegetation loss
-                match += 1
-            if rain < 50:  # low rainfall threshold
-                match += 1
+        total += (ndvi_score + rain_score) / 2
 
-        # 🟢 In-migration expected
-        else:
-            if ndvi >= 0:
-                match += 1
-            if rain >= 50:
-                match += 1
-
-        # each region contributes max 2
-        score += match / 2
-
-    return round(score / total, 3)
+    return round(total / len(zones), 3)
 
 # =========================
 # PREDICT
@@ -216,19 +200,19 @@ def predict():
             f["properties"]["conflict"] = conflict_val
 
             # =========================
-            # 🔥 NEW: LOCAL VALIDATION SCORE
+            # 🔥 FIXED: LOCAL VALIDATION SCORE (CONTINUOUS)
             # =========================
-            score = 0
 
-            # NDVI agreement
-            if (pressure < 0 and ndvi_val < 0) or (pressure >= 0 and ndvi_val >= 0):
-                score += 1
+            # NDVI contribution (assumes delta range roughly -0.3 to 0.3)
+            ndvi_score = 1 - min(1, abs(ndvi_val) / 0.3)
 
-            # Rainfall agreement
-            if (pressure < 0 and rain_val < 50) or (pressure >= 0 and rain_val >= 50):
-                score += 1
+            # Rainfall contribution (normalize around 100 mm)
+            rain_score = min(1, rain_val / 100)
 
-            f["properties"]["validation_score_local"] = round(score / 2, 3)
+            # Combine
+            validation_local = (ndvi_score + rain_score) / 2
+
+            f["properties"]["validation_score_local"] = round(validation_local, 3)
 
         pressures = []
 
