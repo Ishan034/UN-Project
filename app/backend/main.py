@@ -138,7 +138,7 @@ def generate_flows(zones):
     return flows
 
 # =========================
-# VISUAL VALIDATION (FIXED)
+# VISUAL VALIDATION (FINAL FIXED)
 # =========================
 def compute_visual_validation(zones):
     if not zones:
@@ -151,14 +151,15 @@ def compute_visual_validation(zones):
         ndvi = f["properties"].get("ndvi", 0)
         rain = f["properties"].get("rain", 0)
 
-        ndvi_norm = max(0, min(1, ndvi))
-        rain_norm = max(0, min(1, (rain - 20) / 80))
+        # 🔥 FIXED NORMALIZATION
+        ndvi_norm = max(-1, min(1, ndvi / 0.1))
+        rain_norm = max(0, min(1, rain / 80))
 
         if p < 0:
-            ndvi_score = 1 - max(0, ndvi_norm)
+            ndvi_score = -ndvi_norm if ndvi_norm < 0 else 0
             rain_score = 1 - rain_norm
         else:
-            ndvi_score = max(0, ndvi_norm)
+            ndvi_score = ndvi_norm if ndvi_norm > 0 else 0
             rain_score = rain_norm
 
         total += (ndvi_score + rain_score) / 2
@@ -192,16 +193,10 @@ def predict():
         # =========================
         for f in zones:
             c = get_centroid(f)
-
             pressure = f["properties"].get("pressure", 0)
 
-            # type
-            if pressure < 0:
-                f["properties"]["type"] = "source"
-            else:
-                f["properties"]["type"] = "destination"
+            f["properties"]["type"] = "source" if pressure < 0 else "destination"
 
-            # drivers
             ndvi_val = find_nearest_value(c, ndvi, "ndvi")
             rain_val = find_nearest_value(c, rain, "rain")
             conflict_val = find_nearest_value(c, conflict, "weight")
@@ -211,52 +206,39 @@ def predict():
             f["properties"]["conflict"] = conflict_val
 
             # =========================
-            # 🔥 FINAL LOCAL VALIDATION (DIRECTIONAL + CONTRAST)
+            # 🔥 FINAL LOCAL VALIDATION (CORRECTED)
             # =========================
-
-            ndvi_norm = max(0, min(1, ndvi_val))
-            rain_norm = max(0, min(1, (rain_val - 20) / 80))
+            ndvi_norm = max(-1, min(1, ndvi_val / 0.1))
+            rain_norm = max(0, min(1, rain_val / 80))
 
             if pressure < 0:
-                ndvi_score = 1 - max(0, ndvi_norm)
+                ndvi_score = -ndvi_norm if ndvi_norm < 0 else 0
                 rain_score = 1 - rain_norm
             else:
-                ndvi_score = max(0, ndvi_norm)
+                ndvi_score = ndvi_norm if ndvi_norm > 0 else 0
                 rain_score = rain_norm
 
             validation_local = (ndvi_score + rain_score) / 2
-
             f["properties"]["validation_score_local"] = round(validation_local, 3)
 
         pressures = []
 
         for f in zones:
-            p = abs(f["properties"].get("pressure", 0))
-
-            # 🔥 FORCE AMPLIFICATION (TEMP FIX)
-            p = p * 20  # <-- key fix
-
+            p = abs(f["properties"].get("pressure", 0)) * 20
             f["properties"]["pressure"] = p
             pressures.append(p)
-
-        # =========================
-        # FINAL METRIC CALIBRATION (PROPER)
-        # =========================
 
         avg_p = sum(pressures) / len(pressures)
         max_p = max(pressures)
         min_p = min(pressures)
 
-        # ✅ SAFE NORMALIZATION
         range_p = max(max_p - min_p, 1e-6)
         normalized = [(p - min_p) / range_p for p in pressures]
 
         avg_n = sum(normalized) / len(normalized)
         max_n = max(normalized)
-
         variance = sum((p - avg_n) ** 2 for p in normalized) / len(normalized)
 
-        # ✅ FALLBACK (CRITICAL — prevents 0%)
         if max_n < 0.01:
             avg_n = min(1, avg_p * 5)
             max_n = min(1, max_p * 5)
@@ -265,41 +247,13 @@ def predict():
         confidence = round(min(1, 0.5 * max_n + 0.3 * avg_n + 0.2 * variance), 3)
         driver_score = round(min(1, 0.6 * avg_n + 0.4 * variance), 3)
         validation_score = round(min(1, 0.5 * confidence + 0.5 * driver_score), 3)
-        total_pressure = sum(pressures)
 
         risk = (
-            "CRITICAL" if total_pressure > 20 else
-            "HIGH" if total_pressure > 10 else
-            "MODERATE" if total_pressure > 5 else
+            "CRITICAL" if sum(pressures) > 20 else
+            "HIGH" if sum(pressures) > 10 else
+            "MODERATE" if sum(pressures) > 5 else
             "LOW"
         )
-
-        # =========================
-        # TIMELINE
-        # =========================
-        timeline = []
-        steps = 12
-        uncertainty = max(0.05, 0.3 * (1 - confidence))
-
-        for i in range(steps):
-            t = i / steps
-
-            growth = math.exp(-((t - 0.4) ** 2) / 0.02)
-            decay = math.exp(-2 * t)
-
-            base = (0.6 * growth + 0.4 * decay)
-            signal = (0.7 * avg_p + 0.3 * max_p)
-
-            mean_val = base * signal
-
-            timeline.append({
-                "step": f"T{i}",
-                "mean": round(mean_val, 3),
-                "lower": round(mean_val - uncertainty, 3),
-                "upper": round(mean_val + uncertainty, 3),
-                "optimistic": round(mean_val * 0.7, 3),
-                "pessimistic": round(mean_val * 1.3, 3),
-            })
 
         flows = generate_flows(zones)
         visual_validation = compute_visual_validation(zones)
@@ -314,7 +268,6 @@ def predict():
             "risk_level": risk,
             "affected_score": round(sum(pressures), 2),
             "last_updated": datetime.utcnow().isoformat() + "Z",
-            "timeline": timeline,
             "flows": {
                 "type": "FeatureCollection",
                 "features": flows
@@ -355,41 +308,3 @@ def rainfall():
 @app.get("/conflict")
 def conflict():
     return safe_file_response(CONFLICT_FILE)
-
-# =========================
-# HEATMAP ENDPOINT (CRITICAL FIX)
-# =========================
-@app.get("/heatmap")
-def heatmap():
-    try:
-        zones = load_geojson(ZONES_FILE)
-
-        features = []
-
-        for f in zones:
-            pressure = f["properties"].get("pressure", 0)
-
-            # 🔥 STRONG SCALING (FINAL FIX)
-            pressure = pressure * 50
-
-            coords = get_centroid(f)
-
-            features.append({
-                "type": "Feature",
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": coords
-                },
-                "properties": {
-                    "pressure": pressure
-                }
-            })
-
-        return {
-            "type": "FeatureCollection",
-            "features": features
-        }
-
-    except Exception as e:
-        print("Heatmap error:", e)
-        return {"type": "FeatureCollection", "features": []}
