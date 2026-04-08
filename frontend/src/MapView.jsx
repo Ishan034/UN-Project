@@ -344,6 +344,8 @@ export default function MapView() {
           borderRadius: "6px"
         }}>
           <div><b>Confidence:</b> {(confidence * 100).toFixed(1)}%</div>
+          <div><b>Validation:</b> {(data?.validation_score * 100).toFixed(1)}%</div>
+          <div><b>Visual Validation:</b> {((data?.visual_validation ?? 0) * 100).toFixed(1)}%</div>
           <div><b>Drivers:</b> {(data?.driver_score * 100).toFixed(1)}%</div>
           <div><b>Lead time:</b> {leadTime} days</div>
           <div><b>Risk:</b> {data?.risk_level}</div>
@@ -365,6 +367,7 @@ export default function MapView() {
         <label><input type="checkbox" checked={showNDVI} onChange={() => setShowNDVI(!showNDVI)} /> 🌱 NDVI</label><br/>
         <label><input type="checkbox" checked={showRain} onChange={() => setShowRain(!showRain)} /> 🌧 Rainfall</label><br/>
         <label><input type="checkbox" checked={showConflict} onChange={() => setShowConflict(!showConflict)} /> ⚔ Conflict</label><br/>
+        <label><input type="checkbox" checked={showValidation} onChange={() => setShowValidation(!showValidation)} /> 🧪 Validation Layer</label>
       </div>
     </>
   );

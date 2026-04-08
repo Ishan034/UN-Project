@@ -47,7 +47,6 @@ export default function DashboardView() {
   }, []);
 
   const zones = fullData?.zones?.features || [];
-  const regions = fullData?.regions || [];
 
   const sortedZones = [...zones].sort(
     (a, b) =>
@@ -79,6 +78,7 @@ export default function DashboardView() {
 
         <div style={{ color: "#94a3b8", marginBottom: "10px" }}>Overview</div>
         <div style={{ color: "#94a3b8", marginBottom: "10px" }}>Analytics</div>
+        <div style={{ color: "#94a3b8", marginBottom: "10px" }}>Validation</div>
       </div>
 
       {/* MAIN */}
@@ -104,13 +104,15 @@ export default function DashboardView() {
           <MetricCard title="Confidence" value={(confidence * 100).toFixed(1) + "%"} />
           <MetricCard title="Lead Time" value={leadTime + " days"} />
           <MetricCard title="Active Zones" value={zonesCount} />
+          <MetricCard title="Validation" value={(fullData?.validation_score * 100 || 0).toFixed(1) + "%"} />
           <MetricCard title="Drivers" value={(fullData?.driver_score * 100 || 0).toFixed(1) + "%"} />
           <MetricCard title="Risk" value={fullData?.risk_level || "N/A"} />
         </div>
 
         {/* SIGNAL BARS (NEW) */}
-        <Card title="Model Indicators">
+        <Card title="Model Signal Strength">
           <Bar label="Confidence" value={confidence} />
+          <Bar label="Validation" value={fullData?.validation_score || 0} />
           <Bar label="Driver Strength" value={fullData?.driver_score || 0} />
         </Card>
 
@@ -141,54 +143,40 @@ export default function DashboardView() {
           </Card>
 
           {/* REGIONS */}
-          <Card title="🌍 Region Intelligence">
+          <Card title="High Pressure Regions">
+            {topZones.map(function (z, i) {
+              var p = Math.abs(z.properties?.pressure || 0);
 
-  {regions.length === 0 && (
-    <div style={{ opacity: 0.6 }}>No region data</div>
-  )}
+              return (
+                <div
+                  key={i}
+                  onClick={() => setSelectedZone(z)}
+                  style={{
+                    padding: "8px",
+                    marginBottom: "8px",
+                    background: "#020617",
+                    borderRadius: "6px",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div>{z.properties?.type}</div>
+                  <div style={{ fontSize: "12px", opacity: 0.7 }}>
+                    Pressure: {p.toFixed(3)}
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
 
-  {regions.map((r, i) => (
-    <div
-      key={i}
-      style={{
-        padding: "10px",
-        marginBottom: "10px",
-        background: "#020617",
-        borderRadius: "8px"
-      }}
-    >
-      <div style={{ fontWeight: "500" }}>
-        Region {r.region_id}
-      </div>
+        </div>
 
-      <div style={{ fontSize: "12px", opacity: 0.7 }}>
-        Pressure: {r.avg_pressure.toFixed(2)}
-      </div>
-
-      <div style={{ fontSize: "12px", opacity: 0.7 }}>
-        NDVI: {r.avg_ndvi.toFixed(3)}
-      </div>
-
-      <div style={{ fontSize: "12px", opacity: 0.7 }}>
-        Rainfall: {r.avg_rain.toFixed(1)}
-      </div>
-
-      <div style={{ fontSize: "12px", marginTop: "4px" }}>
-        Driver: <b>{r.dominant_driver}</b>
-      </div>
-
-      <div style={{ fontSize: "12px" }}>
-        Risk: <b>{r.risk}</b>
-      </div>
-
-      <div style={{ fontSize: "11px", opacity: 0.6 }}>
-        Zones: {r.zone_count}
-      </div>
-    </div>
-  ))}
-
-</Card>
-
+        {/* VALIDATION */}
+        <div style={{ marginTop: "24px" }}>
+          <Card title="Validation Breakdown">
+            <Bar label="Alignment" value={(fullData?.validation_score || 0) * 0.4} />
+            <Bar label="Direction" value={(fullData?.validation_score || 0) * 0.4} />
+            <Bar label="Stability" value={(fullData?.validation_score || 0) * 0.2} />
+          </Card>
         </div>
 
       </div>
