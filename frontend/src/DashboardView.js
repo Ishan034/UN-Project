@@ -147,7 +147,7 @@ export default function DashboardView() {
     <div style={{ opacity: 0.6 }}>No region data</div>
   )}
 
-  {Array.isArray(regions) && regions.map((r, i) => (
+  {regions.map((r, i) => (
     <div
       key={i}
       style={{
@@ -162,15 +162,15 @@ export default function DashboardView() {
       </div>
 
       <div style={{ fontSize: "12px", opacity: 0.7 }}>
-        Pressure: {(r.avg_pressure ?? 0).toFixed(2)}
+        Pressure: {r.avg_pressure.toFixed(2)}
       </div>
 
       <div style={{ fontSize: "12px", opacity: 0.7 }}>
-        NDVI: {(r.avg_ndvi ?? 0).toFixed(3)}
+        NDVI: {r.avg_ndvi.toFixed(3)}
       </div>
 
       <div style={{ fontSize: "12px", opacity: 0.7 }}>
-        Rainfall: {(r.avg_rain ?? 0).toFixed(1)}
+        Rainfall: {r.avg_rain.toFixed(1)}
       </div>
 
       <div style={{ fontSize: "12px", marginTop: "4px" }}>
