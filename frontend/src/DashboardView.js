@@ -104,7 +104,7 @@ export default function DashboardView() {
           <MetricCard title="Confidence" value={(confidence * 100).toFixed(1) + "%"} />
           <MetricCard title="Lead Time" value={leadTime + " days"} />
           <MetricCard title="Active Zones" value={zonesCount} />
-          <MetricCard title="Drivers" value={(fullData?.driver_score * 100 || 0).toFixed(1) + "%"} />
+          <MetricCard title="Drivers" value={((fullData?.driver_score ?? 0) * 100).toFixed(1) + "%"} />
           <MetricCard title="Risk" value={fullData?.risk_level || "N/A"} />
         </div>
 
@@ -143,7 +143,7 @@ export default function DashboardView() {
           {/* REGIONS */}
           <Card title="🌍 Region Intelligence">
 
-  {regions.length === 0 && (
+  {(!Array.isArray(regions) || regions.length === 0) && (
     <div style={{ opacity: 0.6 }}>No region data</div>
   )}
 
