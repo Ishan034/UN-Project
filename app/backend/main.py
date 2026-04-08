@@ -161,6 +161,69 @@ def compute_visual_validation(zones):
 
     return round(max(0, min(1, adjusted)), 3)
 
+def group_into_regions(zones, grid_size=1.5):
+    regions = {}
+
+    for f in zones:
+        c = get_centroid(f)
+
+        key = (
+            round(c[0] / grid_size),
+            round(c[1] / grid_size)
+        )
+
+        if key not in regions:
+            regions[key] = []
+
+        regions[key].append(f)
+
+    return regions
+
+def compute_region_analysis(regions):
+    results = []
+
+    for key, zone_list in regions.items():
+
+        pressures = [z["properties"]["pressure"] for z in zone_list]
+        ndvi_vals = [z["properties"]["ndvi"] for z in zone_list]
+        rain_vals = [z["properties"]["rain"] for z in zone_list]
+        val_scores = [z["properties"].get("validation_score_local", 0) for z in zone_list]
+
+        avg_pressure = sum(pressures) / len(pressures)
+        avg_ndvi = sum(ndvi_vals) / len(ndvi_vals)
+        avg_rain = sum(rain_vals) / len(rain_vals)
+        avg_validation = sum(val_scores) / len(val_scores)
+
+        # 🔥 DRIVER CONTRIBUTION
+        ndvi_impact = abs(avg_ndvi)
+        rain_impact = avg_rain / 100
+
+        dominant_driver = "NDVI" if ndvi_impact > rain_impact else "Rainfall"
+
+        # 🔥 RISK CLASSIFICATION
+        if avg_pressure > 5:
+            risk = "HIGH"
+        elif avg_pressure > 2:
+            risk = "MODERATE"
+        else:
+            risk = "LOW"
+
+        results.append({
+            "region_id": str(key),
+            "avg_pressure": round(avg_pressure, 3),
+            "avg_ndvi": round(avg_ndvi, 3),
+            "avg_rain": round(avg_rain, 3),
+            "validation": round(avg_validation, 3),
+            "dominant_driver": dominant_driver,
+            "risk": risk,
+            "zone_count": len(zone_list)
+        })
+
+    # 🔥 SORT BY PRESSURE (MOST IMPORTANT FIRST)
+    results.sort(key=lambda x: x["avg_pressure"], reverse=True)
+
+    return results[:15]  # top regions
+
 # =========================
 # PREDICT
 # =========================
@@ -299,6 +362,8 @@ def predict():
 
         flows = generate_flows(zones)
         visual_validation = compute_visual_validation(zones)
+        regions = group_into_regions(zones)
+        region_analysis = compute_region_analysis(regions)
 
         return {
             "status": "ok",
@@ -310,6 +375,7 @@ def predict():
             "risk_level": risk,
             "affected_score": round(sum(pressures), 2),
             "last_updated": datetime.utcnow().isoformat() + "Z",
+            "regions": region_analysis,
             "timeline": timeline,
             "flows": {
                 "type": "FeatureCollection",
