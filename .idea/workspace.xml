@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="c1bf7ab1-69f1-42ba-9751-2bd391c3f185" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/frontend/src/DashboardView.js" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/DashboardView.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
